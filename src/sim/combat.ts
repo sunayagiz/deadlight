@@ -1,37 +1,69 @@
 import { PLAYER_RADIUS } from '../config';
 import { ZOMBIES } from './enemies';
 import { isInvulnerable } from './movement';
-import type { GameState } from './types';
+import type { BulletState, GameState, Vec2, Wall } from './types';
 
 const HIT_FLASH = 0.08; // seconds an enemy flashes white after taking a hit
 
+function insideWall(pos: Vec2, walls: Wall[]): boolean {
+  return walls.some((w) => pos.x > w.x && pos.x < w.x + w.w && pos.y > w.y && pos.y < w.y + w.h);
+}
+
+function firstEnemyHit(state: GameState, b: BulletState) {
+  for (const e of state.enemies) {
+    if (e.hp <= 0) continue;
+    const r = ZOMBIES[e.type].radius;
+    const dx = b.pos.x - e.pos.x;
+    const dy = b.pos.y - e.pos.y;
+    if (dx * dx + dy * dy <= r * r) return e;
+  }
+  return undefined;
+}
+
+/** Area damage to every enemy in radius, plus the player if caught in the blast (RPG self-harm). */
+function explode(state: GameState, at: Vec2, radius: number, damage: number): void {
+  const r2 = radius * radius;
+  for (const e of state.enemies) {
+    const dx = e.pos.x - at.x;
+    const dy = e.pos.y - at.y;
+    if (dx * dx + dy * dy <= r2) {
+      e.hp -= damage;
+      e.hitFlash = HIT_FLASH;
+    }
+  }
+  const p = state.player;
+  if (p.hp > 0 && !isInvulnerable(p)) {
+    const dx = p.pos.x - at.x;
+    const dy = p.pos.y - at.y;
+    if (dx * dx + dy * dy <= r2) p.hp -= damage * 0.5; // self-damage risk, halved
+  }
+}
+
 /**
- * Resolve all damage for one tick. Runs after movement so it uses final
- * positions. Order: bullets hurt enemies, dead enemies are cleared, then
- * living enemies deal contact damage to a non-dashing player.
+ * Resolve all damage for one tick, using final post-movement positions.
+ * Order: bullets (hit / wall / expire, with explosions), clear the dead,
+ * then living enemies deal contact damage to a non-dashing player.
  */
 export function updateCombat(state: GameState, dt: number): void {
-  // Bullets vs enemies: a bullet is consumed by the first enemy it overlaps.
-  const surviving = [];
+  const surviving: BulletState[] = [];
   for (const b of state.bullets) {
-    let consumed = false;
-    for (const e of state.enemies) {
-      if (e.hp <= 0) continue;
-      const r = ZOMBIES[e.type].radius;
-      const dx = b.pos.x - e.pos.x;
-      const dy = b.pos.y - e.pos.y;
-      if (dx * dx + dy * dy <= r * r) {
-        e.hp -= b.damage;
-        e.hitFlash = HIT_FLASH;
-        consumed = true;
-        break;
-      }
+    const hit = firstEnemyHit(state, b);
+    const blocked = insideWall(b.pos, state.walls);
+    const expired = b.ttl <= 0;
+
+    if (hit) {
+      hit.hp -= b.damage;
+      hit.hitFlash = HIT_FLASH;
     }
-    if (!consumed) surviving.push(b);
+    if (hit || blocked || expired) {
+      if (b.splashRadius > 0) explode(state, b.pos, b.splashRadius, b.splashDamage);
+      continue; // bullet consumed
+    }
+    surviving.push(b);
   }
   state.bullets = surviving;
 
-  // Clear the dead and tally kills for the HUD / wave tracking.
+  // Clear the dead and tally kills.
   const before = state.enemies.length;
   state.enemies = state.enemies.filter((e) => e.hp > 0);
   state.wave.killsThisWave += before - state.enemies.length;
@@ -44,9 +76,7 @@ export function updateCombat(state: GameState, dt: number): void {
       const rr = def.radius + PLAYER_RADIUS;
       const dx = p.pos.x - e.pos.x;
       const dy = p.pos.y - e.pos.y;
-      if (dx * dx + dy * dy <= rr * rr) {
-        p.hp -= def.contactDamage * dt;
-      }
+      if (dx * dx + dy * dy <= rr * rr) p.hp -= def.contactDamage * dt;
     }
   }
 
