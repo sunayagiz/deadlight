@@ -47,7 +47,21 @@ const ASSETS = [
   'light_glow', 'light_cone',
 ] as const;
 
-const SOUNDS = ['shot', 'shotgun', 'explosion', 'squelch', 'whoosh', 'hurt', 'door', 'heartbeat'] as const;
+const SOUNDS = [
+  'shot', 'smg', 'shotgun', 'mg', 'minigun', 'rpglaunch',
+  'explosion', 'squelch', 'whoosh', 'hurt', 'door', 'heartbeat',
+  'growl', 'snarl', 'baby', 'knock', 'creak',
+] as const;
+
+/** Per-weapon fire sound. */
+const GUN_SOUND: Record<string, (typeof SOUNDS)[number]> = {
+  pistol: 'shot',
+  smg: 'smg',
+  shotgun: 'shotgun',
+  machinegun: 'mg',
+  minigun: 'minigun',
+  rpg: 'rpglaunch',
+};
 
 /** View-only room decor: subtle floor tint per area so rooms feel distinct. */
 const ROOM_TINTS: { x: number; y: number; w: number; h: number; color: number; alpha: number }[] = [
@@ -103,6 +117,8 @@ export class GameScene extends Phaser.Scene {
   private prevMeleeSwing = 0;
   private prevDashLeft = 0;
   private heartbeat?: Phaser.Sound.BaseSound;
+  private growlCd = 2;
+  private ambientCd = 8;
   private minimapG!: Phaser.GameObjects.Graphics; // static part: walls/doors/fog
   private minimapDot!: Phaser.GameObjects.Graphics; // per-frame player dot
   private explored = new Set<number>(); // fog-of-war cells the player has seen
@@ -315,10 +331,7 @@ export class GameScene extends Phaser.Scene {
       this.time.delayedCall(45, () => flash.destroy());
       this.recoil = 5; // px kickback on the player sprite
       this.lightPulses.push({ x: fx, y: fy, life: 0.09, max: 0.09, size: 130 }); // the shot lights the room
-      const w = WEAPONS[p.weapon];
-      if (w.id === 'shotgun') this.sfx('shotgun', 0.55);
-      else if (w.id === 'rpg') this.sfx('shotgun', 0.6, 0.55);
-      else this.sfx('shot', 0.4, w.id === 'minigun' ? 1.25 : w.id === 'smg' ? 1.15 : 1);
+      this.sfx(GUN_SOUND[p.weapon] ?? 'shot', p.weapon === 'shotgun' || p.weapon === 'rpg' ? 0.55 : 0.42);
     }
     this.gameFeelEvents(deltaMs / 1000);
     this.renderState(alpha, deltaMs / 1000);
@@ -364,9 +377,35 @@ export class GameScene extends Phaser.Scene {
     const open = this.state.doors.filter((d) => d.open).length;
     if (open > this.prevOpenDoors) {
       this.sfx('door', 0.6);
+      this.sfx('creak', 0.5, 0.9 + Math.random() * 0.3);
       this.minimapDirty = true;
     }
     this.prevOpenDoors = open;
+
+    // zombie growls from whatever's near the player — volume falls off with distance
+    this.growlCd -= dt;
+    if (this.growlCd <= 0 && this.state.enemies.length > 0) {
+      const near = this.state.enemies.reduce((a, b) =>
+        (a.pos.x - p.pos.x) ** 2 + (a.pos.y - p.pos.y) ** 2 <= (b.pos.x - p.pos.x) ** 2 + (b.pos.y - p.pos.y) ** 2 ? a : b,
+      );
+      const dist = Math.hypot(near.pos.x - p.pos.x, near.pos.y - p.pos.y);
+      const vol = Math.max(0, 0.6 * (1 - dist / 700));
+      if (vol > 0.05) {
+        const runner = near.type === 'runner' || near.type === 'screamer';
+        this.sfx(runner ? 'snarl' : 'growl', vol, 0.85 + Math.random() * 0.3);
+      }
+      this.growlCd = 1.3 + Math.random() * 3;
+    }
+
+    // sparse creepy atmosphere: a distant baby wail, knocking or a groan
+    this.ambientCd -= dt;
+    if (this.ambientCd <= 0 && !this.state.gameOver) {
+      const pick = Math.random();
+      if (pick < 0.4) this.sfx('creak', 0.4, 0.8 + Math.random() * 0.4);
+      else if (pick < 0.72) this.sfx('knock', 0.5, 0.9 + Math.random() * 0.2);
+      else this.sfx('baby', 0.32, 0.92 + Math.random() * 0.16);
+      this.ambientCd = 11 + Math.random() * 17;
+    }
 
     // melee swing / dash start → whoosh
     if (p.meleeSwing > this.prevMeleeSwing + 0.05) this.sfx('whoosh', 0.45);
