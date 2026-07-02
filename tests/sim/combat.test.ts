@@ -64,3 +64,14 @@ describe('combat', () => {
     expect(s.gameOver).toBe(true);
   });
 });
+
+describe('knockback', () => {
+  it('a bullet shoves the enemy along its travel direction', () => {
+    const s = createGameState([]);
+    const e = spawnEnemy(s, 'shambler', { x: 100, y: 100 });
+    s.bullets = [{ ...bullet(100, 100, 5), vel: { x: 900, y: 0 } }];
+    updateCombat(s, SIM_DT);
+    expect(e.pos.x).toBeGreaterThan(100); // pushed east
+    expect(e.pos.y).toBe(100);
+  });
+});

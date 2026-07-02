@@ -4,6 +4,7 @@ import {
   DASH_SPEED,
   PLAYER_RADIUS,
   PLAYER_SPEED,
+  SPRINT_MULT,
 } from '../config';
 import { norm } from './vec';
 import type { PlayerInput, PlayerState, Wall } from './types';
@@ -28,7 +29,8 @@ export function updateMovement(
     p.vel = { x: p.dash.dirX * DASH_SPEED, y: p.dash.dirY * DASH_SPEED };
   } else {
     const dir = norm({ x: input.moveX, y: input.moveY });
-    p.vel = { x: dir.x * PLAYER_SPEED, y: dir.y * PLAYER_SPEED };
+    const speed = PLAYER_SPEED * (input.sprint ? SPRINT_MULT : 1);
+    p.vel = { x: dir.x * speed, y: dir.y * speed };
   }
 
   // Per-axis integration: blocked axis clamps to the wall face, free axis keeps moving (wall slide).

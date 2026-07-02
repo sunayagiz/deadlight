@@ -1,4 +1,4 @@
-import { PLAYER_RADIUS } from '../config';
+import { BULLET_KNOCKBACK, PLAYER_RADIUS } from '../config';
 import { ZOMBIES } from './enemies';
 import { dropLoot } from './loot';
 import { mapSolids } from './map';
@@ -70,6 +70,13 @@ export function updateCombat(state: GameState, dt: number, rng: () => number = M
       if (hit) {
         hit.hp -= b.damage;
         hit.hitFlash = HIT_FLASH;
+        // Shove along the bullet's travel direction; heavier bodies budge less.
+        const vlen = Math.hypot(b.vel.x, b.vel.y);
+        if (vlen > 0) {
+          const k = BULLET_KNOCKBACK * (13 / ZOMBIES[hit.type].radius);
+          hit.pos.x += (b.vel.x / vlen) * k;
+          hit.pos.y += (b.vel.y / vlen) * k;
+        }
         struck = true;
       }
     }

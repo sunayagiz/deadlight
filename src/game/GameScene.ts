@@ -47,6 +47,21 @@ const ASSETS = [
   'light_glow', 'light_cone',
 ] as const;
 
+const SOUNDS = ['shot', 'shotgun', 'explosion', 'squelch', 'whoosh', 'hurt', 'door', 'heartbeat'] as const;
+
+/** View-only room decor: subtle floor tint per area so rooms feel distinct, plus minimap labels. */
+const ROOM_TINTS: { x: number; y: number; w: number; h: number; color: number; alpha: number }[] = [
+  { x: 24, y: 24, w: 1376, h: 676, color: 0x2a3550, alpha: 0.12 }, // parking — cold blue
+  { x: 1424, y: 24, w: 2876, h: 676, color: 0x403018, alpha: 0.1 }, // grand hall — warm
+  { x: 4324, y: 24, w: 1412, h: 676, color: 0x33291f, alpha: 0.12 }, // warehouse — cardboard
+  { x: 24, y: 724, w: 876, h: 706, color: 0x1f3a2a, alpha: 0.14 }, // lab — sickly green
+  { x: 924, y: 724, w: 976, h: 706, color: 0x2e2a22, alpha: 0.1 }, // office
+  { x: 3824, y: 724, w: 976, h: 706, color: 0x3a3426, alpha: 0.1 }, // kitchen
+  { x: 4824, y: 724, w: 912, h: 706, color: 0x203038, alpha: 0.12 }, // ward — clinical
+  { x: 24, y: 1454, w: 5712, h: 246, color: 0x0c0e14, alpha: 0.3 }, // corridor — near black
+  { x: 2324, y: 1724, w: 1176, h: 412, color: 0x24303a, alpha: 0.16 }, // morgue — cold
+];
+
 interface SpriteItem {
   id: number;
   x: number;
@@ -80,6 +95,17 @@ export class GameScene extends Phaser.Scene {
   private lightPulses: { x: number; y: number; life: number; max: number; size: number }[] = [];
   private recoil = 0;
   private dashGhostCd = 0;
+  private hurtFx = 0;
+  private hurtOverlay!: Phaser.GameObjects.Rectangle;
+  private prevHp = 0;
+  private prevWavePhase = '';
+  private prevOpenDoors = 0;
+  private prevMeleeSwing = 0;
+  private prevDashLeft = 0;
+  private heartbeat?: Phaser.Sound.BaseSound;
+  private minimapG!: Phaser.GameObjects.Graphics;
+  private mapW = 960;
+  private mapH = 540;
   private hpFill!: Phaser.GameObjects.Rectangle;
   private hud!: Phaser.GameObjects.Text;
   private weaponHud!: Phaser.GameObjects.Text;
@@ -95,6 +121,11 @@ export class GameScene extends Phaser.Scene {
 
   preload(): void {
     for (const key of ASSETS) this.load.image(key, `/assets/${key}.png`);
+    for (const key of SOUNDS) this.load.audio(key, `/assets/audio/${key}.wav`);
+  }
+
+  private sfx(key: (typeof SOUNDS)[number], volume = 0.5, rate = 1): void {
+    this.sound.play(key, { volume, rate });
   }
 
   create(): void {
@@ -120,11 +151,19 @@ export class GameScene extends Phaser.Scene {
       this.state.wave.timer = 9999; // hold the wave so the lineup stays put
     }
 
-    // Floor + walls from tiling textures; doors as switchable sprites.
+    this.mapW = map.width;
+    this.mapH = map.height;
+
+    // Floor + per-room tint patches + walls from tiling textures; doors as switchable sprites.
     this.add
       .tileSprite(map.width / 2, map.height / 2, map.width, map.height, 'floor')
       .setTileScale(0.25)
       .setDepth(DEPTH_FLOOR);
+    for (const r of ROOM_TINTS) {
+      this.add
+        .rectangle(r.x + r.w / 2, r.y + r.h / 2, r.w, r.h, r.color, r.alpha)
+        .setDepth(DEPTH_FLOOR + 0.1);
+    }
     for (const w of this.state.walls) {
       this.add.tileSprite(w.x + w.w / 2, w.y + w.h / 2, w.w, w.h, 'wall').setTileScale(0.09375);
     }
@@ -200,6 +239,22 @@ export class GameScene extends Phaser.Scene {
       .setScrollFactor(0)
       .setDepth(DEPTH_HUD)
       .setVisible(false);
+
+    // Damage vignette (flashes red as you take hits).
+    this.hurtOverlay = this.add
+      .rectangle(480, 270, 960, 540, 0x8a0f14, 0)
+      .setScrollFactor(0)
+      .setDepth(DEPTH_HUD - 1);
+    this.prevHp = this.state.player.hp;
+    this.prevWavePhase = this.state.wave.phase;
+
+    // Minimap (top-right): walls + doors + player, redrawn per frame.
+    this.minimapG = this.add.graphics().setScrollFactor(0).setDepth(DEPTH_HUD);
+
+    // R restarts after death.
+    this.input.keyboard!.on('keydown-R', () => {
+      if (this.state.gameOver) this.scene.restart();
+    });
   }
 
   update(_time: number, deltaMs: number): void {
@@ -219,8 +274,115 @@ export class GameScene extends Phaser.Scene {
       this.time.delayedCall(45, () => flash.destroy());
       this.recoil = 5; // px kickback on the player sprite
       this.lightPulses.push({ x: fx, y: fy, life: 0.09, max: 0.09, size: 130 }); // the shot lights the room
+      const w = WEAPONS[p.weapon];
+      if (w.id === 'shotgun') this.sfx('shotgun', 0.55);
+      else if (w.id === 'rpg') this.sfx('shotgun', 0.6, 0.55);
+      else this.sfx('shot', 0.4, w.id === 'minigun' ? 1.25 : w.id === 'smg' ? 1.15 : 1);
     }
+    this.gameFeelEvents(deltaMs / 1000);
     this.renderState(alpha, deltaMs / 1000);
+  }
+
+  /** Sound + feedback triggers derived from sim-state transitions. */
+  private gameFeelEvents(dt: number): void {
+    const p = this.state.player;
+
+    // took damage → red vignette + shake + grunt
+    if (p.hp < this.prevHp - 0.01) {
+      const lost = this.prevHp - p.hp;
+      this.hurtFx = Math.min(1, this.hurtFx + lost * 0.06);
+      if (lost > 2) {
+        this.cameras.main.shake(90, 0.004);
+        this.sfx('hurt', 0.5);
+      }
+    }
+    this.prevHp = p.hp;
+    this.hurtFx = Math.max(0, this.hurtFx - dt * 1.6);
+    this.hurtOverlay.setFillStyle(0x8a0f14, this.hurtFx * 0.4);
+
+    // heartbeat when near death
+    const dying = p.hp > 0 && p.hp < 30 && !this.state.gameOver;
+    if (dying && !this.heartbeat) {
+      this.heartbeat = this.sound.add('heartbeat', { loop: true, volume: 0.6 });
+      this.heartbeat.play();
+    } else if (!dying && this.heartbeat) {
+      this.heartbeat.stop();
+      this.heartbeat.destroy();
+      this.heartbeat = undefined;
+    }
+
+    // wave transitions → banner
+    const phase = this.state.wave.phase;
+    if (phase !== this.prevWavePhase) {
+      if (phase === 'active') this.banner(`WAVE ${this.state.wave.index}`, '#c23b3b');
+      else this.banner('WAVE CLEARED', '#7a9c6a');
+      this.prevWavePhase = phase;
+    }
+
+    // doors opening → creak
+    const open = this.state.doors.filter((d) => d.open).length;
+    if (open > this.prevOpenDoors) this.sfx('door', 0.6);
+    this.prevOpenDoors = open;
+
+    // melee swing / dash start → whoosh
+    if (p.meleeSwing > this.prevMeleeSwing + 0.05) this.sfx('whoosh', 0.45);
+    this.prevMeleeSwing = p.meleeSwing;
+    if (p.dash.timeLeft > this.prevDashLeft + 0.05) this.sfx('whoosh', 0.3, 1.4);
+    this.prevDashLeft = p.dash.timeLeft;
+
+    // fresh bullet hits → squelch + blood spurt (cap one sound per frame)
+    let squelched = false;
+    for (const e of this.state.enemies) {
+      if (e.hitFlash > 0.065) {
+        if (!squelched) {
+          this.sfx('squelch', 0.5, 0.9 + Math.random() * 0.3);
+          squelched = true;
+        }
+        for (let i = 0; i < 2; i++) {
+          const drop = this.add.circle(e.pos.x, e.pos.y, 2.5, 0x7a1616, 0.9);
+          this.tweens.add({
+            targets: drop,
+            x: e.pos.x + (Math.random() - 0.5) * 46,
+            y: e.pos.y + (Math.random() - 0.5) * 46,
+            alpha: 0,
+            duration: 240,
+            onComplete: () => drop.destroy(),
+          });
+        }
+      }
+    }
+  }
+
+  private banner(text: string, color: string): void {
+    const t = this.add
+      .text(480, 190, text, { fontFamily: 'monospace', fontSize: '42px', color, fontStyle: 'bold' })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(DEPTH_HUD)
+      .setAlpha(0);
+    this.tweens.add({ targets: t, alpha: 1, duration: 250, yoyo: true, hold: 1100, onComplete: () => t.destroy() });
+  }
+
+  /** Corner minimap: walls, doors, player. Enemies stay hidden (fog). */
+  private drawMinimap(): void {
+    const g = this.minimapG;
+    const scale = 200 / this.mapW;
+    const mx = 960 - 216;
+    const my = 14;
+    g.clear();
+    g.fillStyle(0x05060a, 0.55);
+    g.fillRect(mx - 4, my - 4, 208 + 8, this.mapH * scale + 8);
+    g.fillStyle(0x555b66, 0.9);
+    for (const w of this.state.walls) {
+      g.fillRect(mx + w.x * scale, my + w.y * scale, Math.max(1, w.w * scale), Math.max(1, w.h * scale));
+    }
+    for (const d of this.state.doors) {
+      g.fillStyle(d.open ? 0x3a4a3a : 0x8a5a2a, 1);
+      g.fillRect(mx + d.x * scale, my + d.y * scale, Math.max(2, d.w * scale), Math.max(2, d.h * scale));
+    }
+    g.fillStyle(0xe8eaed, 1);
+    const p = this.state.player;
+    g.fillCircle(mx + p.pos.x * scale, my + p.pos.y * scale, 2.4);
   }
 
   private renderState(alpha: number, dt: number): void {
@@ -339,7 +501,18 @@ export class GameScene extends Phaser.Scene {
         tintFill: e.boss && e.boss.telegraph > 0 ? COLORS.telegraphTint : e.hitFlash > 0 ? 0xffffff : undefined,
         wobble: e.boss ? 0.05 : 0.11, // shamble sway; heavier bodies sway less
       })),
-      (lastX, lastY, id) => this.spawnBlood(lastX, lastY, id),
+      (lastX, lastY, id, img) => {
+        this.spawnBlood(lastX, lastY, id);
+        // corpse: the sprite stays behind, darkened, and slowly soaks away
+        const corpse = this.add
+          .image(lastX, lastY, img.texture.key)
+          .setRotation(img.rotation + 0.5)
+          .setTint(0x2c2c30)
+          .setAlpha(0.85)
+          .setDepth(DEPTH_BLOOD + 0.1);
+        corpse.setDisplaySize(img.displayWidth, img.displayHeight);
+        this.tweens.add({ targets: corpse, alpha: 0, duration: 9000, onComplete: () => corpse.destroy() });
+      },
     );
 
     // Loot: weapon drops show the actual weapon, ammo shows the ammo box.
@@ -383,11 +556,18 @@ export class GameScene extends Phaser.Scene {
 
     if (this.state.gameOver && !this.overlay) {
       this.overlay = this.add
-        .text(480, 270, 'YOU DIED', { fontFamily: 'monospace', fontSize: '48px', color: '#c23b3b' })
+        .text(480, 270, 'YOU DIED\n\n[R] restart', {
+          fontFamily: 'monospace',
+          fontSize: '48px',
+          color: '#c23b3b',
+          align: 'center',
+        })
         .setOrigin(0.5)
         .setScrollFactor(0)
         .setDepth(DEPTH_HUD);
     }
+
+    this.drawMinimap();
   }
 
   /** Scale an image to a display height, preserving the source aspect ratio. */
@@ -454,7 +634,7 @@ export class GameScene extends Phaser.Scene {
   private syncSprites(
     pool: Map<number, Phaser.GameObjects.Image>,
     items: SpriteItem[],
-    onRemove?: (lastX: number, lastY: number, id: number) => void,
+    onRemove?: (lastX: number, lastY: number, id: number, img: Phaser.GameObjects.Image) => void,
   ): void {
     const seen = new Set<number>();
     const t = this.state.time;
@@ -481,7 +661,7 @@ export class GameScene extends Phaser.Scene {
     }
     for (const [id, img] of pool) {
       if (!seen.has(id)) {
-        onRemove?.(img.x, img.y, id);
+        onRemove?.(img.x, img.y, id, img);
         img.destroy();
         pool.delete(id);
       }

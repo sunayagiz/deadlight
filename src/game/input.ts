@@ -7,6 +7,7 @@ interface Keys {
   S: Phaser.Input.Keyboard.Key;
   D: Phaser.Input.Keyboard.Key;
   SPACE: Phaser.Input.Keyboard.Key;
+  SHIFT: Phaser.Input.Keyboard.Key;
 }
 
 /** The only place that touches raw keyboard/mouse. Everything downstream sees PlayerInput. */
@@ -14,7 +15,7 @@ export class InputCollector {
   private keys: Keys;
 
   constructor(private scene: Phaser.Scene) {
-    this.keys = scene.input.keyboard!.addKeys('W,A,S,D,SPACE') as Keys;
+    this.keys = scene.input.keyboard!.addKeys('W,A,S,D,SPACE,SHIFT') as Keys;
   }
 
   sample(): PlayerInput {
@@ -27,6 +28,7 @@ export class InputCollector {
       aimWorldY: world.y,
       fire: pointer.isDown,
       dash: Phaser.Input.Keyboard.JustDown(this.keys.SPACE),
+      sprint: this.keys.SHIFT.isDown,
     };
   }
 }

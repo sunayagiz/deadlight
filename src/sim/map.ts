@@ -84,8 +84,74 @@ export function buildMap(): MapDef {
   vwall(walls, 4800, 724, 1430, [[1000, 110]]); // kitchen↔ward (interior door)
   walls.push({ x: 2450, y: 1040, w: 180, h: 90 }); // lobby cover blocks
   walls.push({ x: 3150, y: 1040, w: 180, h: 90 });
-  walls.push({ x: 1300, y: 1050, w: 160, h: 90 }); // office desk
-  walls.push({ x: 4200, y: 1060, w: 260, h: 70 }); // kitchen counter
+
+  // ── furniture & clutter: break the boxes into real rooms (all solid cover)
+  walls.push(
+    // parking: wrecked cars in rows
+    { x: 220, y: 160, w: 120, h: 52 },
+    { x: 460, y: 150, w: 120, h: 52 },
+    { x: 760, y: 170, w: 120, h: 52 },
+    { x: 340, y: 420, w: 120, h: 52 },
+    { x: 820, y: 460, w: 120, h: 52 },
+    { x: 1120, y: 300, w: 52, h: 120 }, // one parked sideways
+    // warehouse: crate stacks
+    { x: 4520, y: 140, w: 130, h: 130 },
+    { x: 4780, y: 300, w: 100, h: 100 },
+    { x: 5150, y: 130, w: 130, h: 130 },
+    { x: 5350, y: 420, w: 100, h: 100 },
+    { x: 4950, y: 540, w: 130, h: 90 },
+    // lab: work tables
+    { x: 300, y: 900, w: 180, h: 60 },
+    { x: 540, y: 1160, w: 180, h: 60 },
+    { x: 180, y: 1250, w: 60, h: 120 },
+    // office: desk grid
+    { x: 1150, y: 880, w: 130, h: 70 },
+    { x: 1450, y: 880, w: 130, h: 70 },
+    { x: 1300, y: 1120, w: 130, h: 70 },
+    { x: 1620, y: 1250, w: 130, h: 70 },
+    // kitchen: L-shaped counters
+    { x: 4200, y: 1060, w: 260, h: 70 },
+    { x: 4130, y: 850, w: 70, h: 210 },
+    { x: 4550, y: 820, w: 180, h: 60 },
+    // ward: bed rows
+    { x: 4980, y: 800, w: 110, h: 50 },
+    { x: 5250, y: 800, w: 110, h: 50 },
+    { x: 4980, y: 1250, w: 110, h: 50 },
+    { x: 5250, y: 1250, w: 110, h: 50 },
+    { x: 5520, y: 1020, w: 110, h: 50 },
+    // grand hall: column posts flanking the pillars
+    { x: 1800, y: 180, w: 48, h: 48 },
+    { x: 1800, y: 480, w: 48, h: 48 },
+    { x: 2900, y: 120, w: 48, h: 48 },
+    { x: 2900, y: 520, w: 48, h: 48 },
+    { x: 3900, y: 180, w: 48, h: 48 },
+    { x: 3900, y: 480, w: 48, h: 48 },
+    // service corridor: abandoned crates
+    { x: 900, y: 1510, w: 90, h: 60 },
+    { x: 3620, y: 1580, w: 90, h: 60 },
+    { x: 4650, y: 1490, w: 90, h: 60 },
+    // lock-ups: armory racks, morgue slabs, storage shelving
+    { x: 1300, y: 1850, w: 70, h: 180 },
+    { x: 1560, y: 1850, w: 70, h: 180 },
+    { x: 1850, y: 1900, w: 70, h: 180 },
+    { x: 2500, y: 1850, w: 90, h: 150 },
+    { x: 2760, y: 1850, w: 90, h: 150 },
+    { x: 3050, y: 1900, w: 90, h: 150 },
+    { x: 3700, y: 1850, w: 220, h: 60 },
+    { x: 3700, y: 2010, w: 220, h: 60 },
+    { x: 4150, y: 1850, w: 220, h: 60 },
+    // buttresses breaking the long straight border walls
+    { x: 800, y: 24, w: 90, h: 56 },
+    { x: 2600, y: 24, w: 70, h: 56 },
+    { x: 3700, y: 24, w: 70, h: 56 },
+    { x: 4800, y: 24, w: 90, h: 56 },
+    { x: 24, y: 380, w: 56, h: 90 },
+    { x: 24, y: 1150, w: 56, h: 90 },
+    { x: 5680, y: 420, w: 56, h: 90 },
+    { x: 5680, y: 1100, w: 56, h: 90 },
+    { x: 1500, y: 2056, w: 90, h: 56 },
+    { x: 4400, y: 2056, w: 90, h: 56 },
+  );
 
   // ── middle/south divider (y 1430): lab stairs, D5 gate, ward stairs
   hwall(walls, 1430, T, W - T, [

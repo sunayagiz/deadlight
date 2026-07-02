@@ -11,6 +11,7 @@ export interface PlayerInput {
   aimWorldY: number;
   fire: boolean;
   dash: boolean;
+  sprint: boolean;
 }
 
 export type WeaponId =

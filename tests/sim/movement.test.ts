@@ -34,3 +34,12 @@ describe('updateMovement', () => {
     expect(p.pos.y).toBeGreaterThan(100); // still moving on Y
   });
 });
+
+describe('sprint', () => {
+  it('moves faster while sprinting', async () => {
+    const { SPRINT_MULT } = await import('../../src/config');
+    const p = createPlayer(100, 100);
+    updateMovement(p, { ...emptyInput(), moveX: 1, sprint: true }, [], SIM_DT);
+    expect(p.pos.x).toBeCloseTo(100 + PLAYER_SPEED * SPRINT_MULT * SIM_DT);
+  });
+});
