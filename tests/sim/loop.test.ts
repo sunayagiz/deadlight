@@ -34,4 +34,19 @@ describe('FixedLoop', () => {
     loop.tick(1.0, () => steps++); // one full second hitch
     expect(steps).toBe(5);
   });
+
+  it('survives a NaN elapsed sample without poisoning the accumulator', () => {
+    const loop = new FixedLoop(DT);
+    let steps = 0;
+    loop.tick(Number.NaN, () => steps++);
+    expect(steps).toBe(0);
+    loop.tick(DT * 1.5, () => steps++);
+    expect(steps).toBe(1); // still alive after the bad frame
+  });
+
+  it('treats negative elapsed as zero (alpha stays in [0, 1))', () => {
+    const loop = new FixedLoop(DT);
+    const alpha = loop.tick(-0.5, () => {});
+    expect(alpha).toBe(0);
+  });
 });

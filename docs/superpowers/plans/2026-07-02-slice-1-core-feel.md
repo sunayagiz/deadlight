@@ -410,6 +410,21 @@ describe('FixedLoop', () => {
     loop.tick(1.0, () => steps++); // one full second hitch
     expect(steps).toBe(5);
   });
+
+  it('survives a NaN elapsed sample without poisoning the accumulator', () => {
+    const loop = new FixedLoop(DT);
+    let steps = 0;
+    loop.tick(Number.NaN, () => steps++);
+    expect(steps).toBe(0);
+    loop.tick(DT * 1.5, () => steps++);
+    expect(steps).toBe(1); // still alive after the bad frame
+  });
+
+  it('treats negative elapsed as zero (alpha stays in [0, 1))', () => {
+    const loop = new FixedLoop(DT);
+    const alpha = loop.tick(-0.5, () => {});
+    expect(alpha).toBe(0);
+  });
 });
 ```
 
@@ -431,10 +446,11 @@ export class FixedLoop {
   ) {}
 
   /**
-   * @param elapsed seconds since last tick
+   * @param elapsed seconds since last tick (NaN/negative samples are treated as 0)
    * @returns interpolation alpha in [0, 1): how far we are into the next sim tick
    */
   tick(elapsed: number, step: () => void): number {
+    if (!Number.isFinite(elapsed) || elapsed < 0) elapsed = 0; // one bad frame must not poison the accumulator
     this.acc = Math.min(this.acc + elapsed, this.dt * this.maxSteps);
     while (this.acc >= this.dt) {
       step();
