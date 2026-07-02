@@ -131,12 +131,22 @@ export class GameScene extends Phaser.Scene {
     this.setSpriteHeight(this.playerSprite, PLAYER_RADIUS * 4.2);
     this.inputCollector = new InputCollector(this);
 
-    // Darkness overlay: fill a render texture, erase soft light textures out of it.
-    // (RenderTexture.erase works identically on WebGL and Canvas; geometry-mask
-    // invertAlpha silently fails on the Canvas renderer.)
-    this.darkRT = this.add.renderTexture(0, 0, 960, 540).setOrigin(0, 0).setDepth(DEPTH_DARK);
+    // Darkness overlay: fill a screen-sized render texture pinned to the camera,
+    // erase soft light textures out of it (in screen space). Screen-sized + camera
+    // -relative scales to any map size. (RenderTexture.erase works identically on
+    // WebGL and Canvas; geometry-mask invertAlpha silently fails on Canvas.)
+    this.darkRT = this.add
+      .renderTexture(0, 0, 960, 540)
+      .setOrigin(0, 0)
+      .setScrollFactor(0)
+      .setDepth(DEPTH_DARK);
     this.coneImg = this.make.image({ key: 'light_cone', add: false }).setOrigin(0.028, 0.5);
     this.glowImg = this.make.image({ key: 'light_glow', add: false });
+
+    // Camera: follow the player inside the map bounds. With a one-screen map this
+    // is a no-op; it becomes the scrolling camera as soon as the map outgrows 960×540.
+    this.cameras.main.setBounds(0, 0, 960, 540);
+    this.cameras.main.startFollow(this.playerSprite, true, 0.12, 0.12);
 
     // Weapon switching.
     this.input.keyboard!.on('keydown', (ev: KeyboardEvent) => {
@@ -231,13 +241,17 @@ export class GameScene extends Phaser.Scene {
     }
 
     // Soft flashlight cone (subtle flicker) + ambient glow + transient light pulses.
+    // The darkness RT is camera-pinned, so all erases happen in screen space.
+    const cam = this.cameras.main;
+    const ox = cam.scrollX;
+    const oy = cam.scrollY;
     const flicker = 1 + Math.sin(this.state.time * 13) * 0.012 + Math.sin(this.state.time * 47) * 0.008;
     const coneLen = FLASHLIGHT_RANGE * 1.12 * flicker;
     this.coneImg
-      .setPosition(x, y)
+      .setPosition(x - ox, y - oy)
       .setRotation(p.aimAngle)
       .setDisplaySize(coneLen, 2 * Math.tan(FLASHLIGHT_HALF_ANGLE) * coneLen * 1.35);
-    this.glowImg.setPosition(x, y).setDisplaySize(AMBIENT_RADIUS * 2.9, AMBIENT_RADIUS * 2.9).setAlpha(1);
+    this.glowImg.setPosition(x - ox, y - oy).setDisplaySize(AMBIENT_RADIUS * 2.9, AMBIENT_RADIUS * 2.9).setAlpha(1);
     this.darkRT.clear();
     this.darkRT.fill(0x05060a, 0.94);
     this.darkRT.erase(this.coneImg);
@@ -245,7 +259,10 @@ export class GameScene extends Phaser.Scene {
     for (const pulse of this.lightPulses) {
       pulse.life -= dt;
       const s = pulse.size * (0.6 + 0.4 * (pulse.life / pulse.max));
-      this.glowImg.setPosition(pulse.x, pulse.y).setDisplaySize(s, s).setAlpha(Math.max(0, pulse.life / pulse.max));
+      this.glowImg
+        .setPosition(pulse.x - ox, pulse.y - oy)
+        .setDisplaySize(s, s)
+        .setAlpha(Math.max(0, pulse.life / pulse.max));
       this.darkRT.erase(this.glowImg);
     }
     this.lightPulses = this.lightPulses.filter((f) => f.life > 0);
