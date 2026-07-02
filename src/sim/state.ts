@@ -22,9 +22,12 @@ export function createGameState(
   spawnZones: SpawnZone[] = [],
   doors: Door[] = [],
   playerStart: { x: number; y: number } = { x: 480, y: 270 },
+  dims: { width: number; height: number } = { width: 960, height: 540 },
 ): GameState {
   return {
     time: 0,
+    mapW: dims.width,
+    mapH: dims.height,
     player: createPlayer(playerStart.x, playerStart.y),
     bullets: [],
     nextBulletId: 1,

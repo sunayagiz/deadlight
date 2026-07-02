@@ -99,7 +99,10 @@ export class GameScene extends Phaser.Scene {
 
   create(): void {
     const map = buildMap();
-    this.state = createGameState(map.walls, map.spawnZones, map.doors, map.playerStart);
+    this.state = createGameState(map.walls, map.spawnZones, map.doors, map.playerStart, {
+      width: map.width,
+      height: map.height,
+    });
 
     // Debug/playtest: ?wave=N jumps straight to wave N with a short countdown;
     // ?zoo=1 lines up one of every enemy type for sprite inspection.
@@ -111,12 +114,17 @@ export class GameScene extends Phaser.Scene {
     }
     if (qs.get('zoo')) {
       const types = ['shambler', 'runner', 'brute', 'bloater', 'screamer'] as const;
-      types.forEach((t, i) => spawnEnemy(this.state, t, { x: 180 + i * 70, y: 160 }));
+      types.forEach((t, i) =>
+        spawnEnemy(this.state, t, { x: map.playerStart.x - 220 + i * 90, y: map.playerStart.y - 160 }),
+      );
       this.state.wave.timer = 9999; // hold the wave so the lineup stays put
     }
 
     // Floor + walls from tiling textures; doors as switchable sprites.
-    this.add.tileSprite(480, 270, 960, 540, 'floor').setTileScale(0.25).setDepth(DEPTH_FLOOR);
+    this.add
+      .tileSprite(map.width / 2, map.height / 2, map.width, map.height, 'floor')
+      .setTileScale(0.25)
+      .setDepth(DEPTH_FLOOR);
     for (const w of this.state.walls) {
       this.add.tileSprite(w.x + w.w / 2, w.y + w.h / 2, w.w, w.h, 'wall').setTileScale(0.09375);
     }
@@ -143,10 +151,11 @@ export class GameScene extends Phaser.Scene {
     this.coneImg = this.make.image({ key: 'light_cone', add: false }).setOrigin(0.028, 0.5);
     this.glowImg = this.make.image({ key: 'light_glow', add: false });
 
-    // Camera: follow the player inside the map bounds. With a one-screen map this
-    // is a no-op; it becomes the scrolling camera as soon as the map outgrows 960×540.
-    this.cameras.main.setBounds(0, 0, 960, 540);
-    this.cameras.main.startFollow(this.playerSprite, true, 0.12, 0.12);
+    // Camera: follow the player across the building (lerp + deadzone per the
+    // Phaser top-down recipe; roundPixels kills sub-pixel shimmer).
+    this.cameras.main.setBounds(0, 0, map.width, map.height);
+    this.cameras.main.startFollow(this.playerSprite, true, 0.1, 0.1);
+    this.cameras.main.setDeadzone(120, 80);
 
     // Weapon switching.
     this.input.keyboard!.on('keydown', (ev: KeyboardEvent) => {

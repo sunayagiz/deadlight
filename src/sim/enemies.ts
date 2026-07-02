@@ -1,4 +1,5 @@
 import { ENEMY_SEPARATION_FORCE, ENEMY_SEPARATION_RADIUS } from '../config';
+import { sampleFlow, type FlowField } from './flowfield';
 import { norm } from './vec';
 import type { EnemyState, EnemyType, GameState, PlayerState, SpawnZone, Wall } from './types';
 
@@ -70,13 +71,17 @@ export function updateEnemies(
   player: PlayerState,
   walls: Wall[],
   dt: number,
+  flow?: FlowField,
 ): void {
   for (const e of enemies) {
     e.hitFlash = Math.max(0, e.hitFlash - dt);
     const def = ZOMBIES[e.type];
 
-    // Seek the player, add separation steering, renormalize to keep constant speed.
-    const seek = norm({ x: player.pos.x - e.pos.x, y: player.pos.y - e.pos.y });
+    // Route via the flow field (handles rooms/doors); fall back to straight
+    // seek when off-grid or unreachable. Separation keeps the horde spread.
+    const seek =
+      (flow && sampleFlow(flow, e.pos.x, e.pos.y)) ??
+      norm({ x: player.pos.x - e.pos.x, y: player.pos.y - e.pos.y });
     const sep = separation(e, enemies);
     const desired = norm({
       x: seek.x * def.speed + sep.x * ENEMY_SEPARATION_FORCE,

@@ -1,12 +1,19 @@
 import {
   BOSS_WAVE_INTERVAL,
   BRUTE_MIN_WAVE,
+  FLASHLIGHT_HALF_ANGLE,
+  FLASHLIGHT_RANGE,
+  SPAWN_MIN_DIST,
+  SPAWN_RETRY,
+  SPAWN_SIGHT_DIST,
   WAVE_BUDGET_BASE,
   WAVE_BUDGET_GROWTH,
   WAVE_INTERMISSION,
   WAVE_SPAWN_INTERVAL,
 } from '../config';
 import { ZOMBIES, spawnEnemy } from './enemies';
+import { mapSolids } from './map';
+import { segmentClear } from './vision';
 import type { EnemyType, GameState, SpawnZone } from './types';
 
 export function isBossWave(index: number): boolean {
@@ -45,10 +52,48 @@ export function buildWaveQueue(index: number, rng: Rng): EnemyType[] {
   return queue;
 }
 
-function pickZone(state: GameState, rng: Rng): SpawnZone {
-  const zones = state.spawnZones;
-  if (zones.length === 0) return { x: 24, y: 24 }; // fallback; real maps always define zones
-  return zones[Math.floor(rng() * zones.length) % zones.length];
+/** Shortest signed angular distance from a to b. */
+function angleDiff(a: number, b: number): number {
+  let d = a - b;
+  while (d > Math.PI) d -= 2 * Math.PI;
+  while (d < -Math.PI) d += 2 * Math.PI;
+  return d;
+}
+
+/**
+ * L4D-style spawn validity: the zone's room must be unlocked (minWave), it
+ * must not be right on top of a player, and it must not sit inside the
+ * player's flashlight view (in cone + close + clear line of sight).
+ */
+function zoneValid(state: GameState, z: SpawnZone): boolean {
+  if ((z.minWave ?? 0) > state.wave.index) return false;
+  const p = state.player;
+  const dx = z.x - p.pos.x;
+  const dy = z.y - p.pos.y;
+  const dist = Math.hypot(dx, dy);
+  if (dist < SPAWN_MIN_DIST) return false;
+  const inCone =
+    dist < FLASHLIGHT_RANGE * SPAWN_SIGHT_DIST &&
+    Math.abs(angleDiff(Math.atan2(dy, dx), p.aimAngle)) < FLASHLIGHT_HALF_ANGLE * 1.25;
+  if (inCone && segmentClear(p.pos, { x: z.x, y: z.y }, mapSolids(state))) return false;
+  return true;
+}
+
+/** A random valid zone, or null when every zone is currently watched/locked (caller retries). */
+function pickZone(state: GameState, rng: Rng): SpawnZone | null {
+  const valid = state.spawnZones.filter((z) => zoneValid(state, z));
+  if (valid.length === 0) return state.spawnZones.length === 0 ? { x: 24, y: 24 } : null;
+  return valid[Math.floor(rng() * valid.length) % valid.length];
+}
+
+/** Least-bad zone for a boss entrance: unlocked and farthest from the player. */
+function pickBossZone(state: GameState): SpawnZone {
+  const p = state.player;
+  const eligible = state.spawnZones.filter((z) => (z.minWave ?? 0) <= state.wave.index);
+  const pool = eligible.length > 0 ? eligible : [{ x: 24, y: 24 }];
+  return pool.reduce((a, b) =>
+    Math.hypot(a.x - p.pos.x, a.y - p.pos.y) >= Math.hypot(b.x - p.pos.x, b.y - p.pos.y) ? a : b,
+  );
 }
 
 function startWave(state: GameState, rng: Rng): void {
@@ -58,7 +103,7 @@ function startWave(state: GameState, rng: Rng): void {
   wave.spawnCooldown = 0; // first enemy spawns on the next tick
   wave.killsThisWave = 0;
   if (isBossWave(wave.index)) {
-    spawnEnemy(state, bossForWave(wave.index), pickZone(state, rng)); // boss enters alongside the wave
+    spawnEnemy(state, bossForWave(wave.index), pickBossZone(state)); // boss enters alongside the wave
   }
 }
 
@@ -72,12 +117,18 @@ export function updateWaves(state: GameState, dt: number, rng: Rng = Math.random
     return;
   }
 
-  // active phase: drain the spawn queue on an interval
+  // active phase: drain the spawn queue on an interval; if every zone is
+  // watched or locked, HOLD the spawn and retry — budget is never skipped.
   wave.spawnCooldown -= dt;
   if (wave.spawnQueue.length > 0 && wave.spawnCooldown <= 0) {
-    const type = wave.spawnQueue.shift()!;
-    spawnEnemy(state, type, pickZone(state, rng));
-    wave.spawnCooldown = WAVE_SPAWN_INTERVAL;
+    const zone = pickZone(state, rng);
+    if (zone) {
+      const type = wave.spawnQueue.shift()!;
+      spawnEnemy(state, type, zone);
+      wave.spawnCooldown = WAVE_SPAWN_INTERVAL;
+    } else {
+      wave.spawnCooldown = SPAWN_RETRY;
+    }
   }
 
   // wave is cleared once nothing is left to spawn and nothing is left alive

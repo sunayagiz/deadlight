@@ -100,12 +100,14 @@ export interface Door {
   w: number;
   h: number;
   open: boolean;
+  minWave: number; // 0 = interior door (always openable); gate doors unlock at this wave
 }
 
 /** Where enemies enter the map. Never spawn on top of the players. */
 export interface SpawnZone {
   x: number;
   y: number;
+  minWave?: number; // zone activates at this wave (rooms behind gates)
 }
 
 export type WavePhase = 'intermission' | 'active';
@@ -122,6 +124,8 @@ export interface WaveState {
 /** Serializable plain data — this is what will go over the wire in the netcode slice. */
 export interface GameState {
   time: number; // seconds
+  mapW: number;
+  mapH: number;
   player: PlayerState;
   bullets: BulletState[];
   nextBulletId: number;

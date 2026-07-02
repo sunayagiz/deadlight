@@ -36,3 +36,11 @@ export const DOOR_OPEN_RADIUS = 46; // px: doors swing open when the player gets
 export const FLASHLIGHT_RANGE = 340; // px reach of the flashlight cone
 export const FLASHLIGHT_HALF_ANGLE = 0.62; // radians: half-width of the cone (~35°)
 export const AMBIENT_RADIUS = 70; // px of dim light around the player regardless of aim
+
+// --- Spawning (L4D-style: never in the player's face) ---
+export const SPAWN_MIN_DIST = 300; // px: never spawn closer than this to a player
+export const SPAWN_SIGHT_DIST = 1.6; // × FLASHLIGHT_RANGE: inside this + in cone + clear LOS = rejected
+export const SPAWN_RETRY = 0.2; // s before retrying when no valid zone exists
+
+// --- Flow field pathfinding ---
+export const FLOW_CELL = 40; // px grid cell for the zombie flow field
