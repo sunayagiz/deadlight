@@ -41,10 +41,10 @@ describe('flow field', () => {
       width: m.width,
       height: m.height,
     });
-    // zombie in the west office; player in the lobby; rock between them.
-    // open the D1 gate so a path exists (gate at x 3480)
-    s.doors.find((d) => d.minWave === 2 && d.x === 3480)!.open = true;
-    const e = spawnEnemy(s, 'runner', { x: 2160, y: 1560 });
+    // zombie in the west wing; player in the lobby; rock between them.
+    // open the D1 gate (west, the mw2 door left of the lobby) so a path exists.
+    s.doors.find((d) => d.minWave === 2 && d.x < 4000)!.open = true;
+    const e = spawnEnemy(s, 'runner', { x: 1400, y: 1900 });
     const before = Math.hypot(s.player.pos.x - e.pos.x, s.player.pos.y - e.pos.y);
     for (let i = 0; i < 60 * 8; i++) stepSim(s, emptyInput(), SIM_DT, () => 0.99);
     const after = Math.hypot(s.player.pos.x - e.pos.x, s.player.pos.y - e.pos.y);
@@ -58,7 +58,8 @@ describe('flow field', () => {
       height: m.height,
     });
     const f = computeFlowField(s.mapW, s.mapH, mapSolids(s), [s.player.pos]);
-    // cell in the middle of closed D1's gap: blocked, so no direction
-    expect(sampleFlow(f, 3492, 1890)).toBeNull();
+    // the closed D1 gate bar itself is solid, so its cell has no flow direction
+    const d1 = s.doors.find((d) => d.minWave === 2 && d.x < 4000)!;
+    expect(sampleFlow(f, d1.x + d1.w / 2, d1.y + d1.h / 2)).toBeNull();
   });
 });

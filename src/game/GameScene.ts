@@ -51,14 +51,14 @@ const SOUNDS = ['shot', 'shotgun', 'explosion', 'squelch', 'whoosh', 'hurt', 'do
 
 /** View-only room decor: subtle floor tint per area so rooms feel distinct. */
 const ROOM_TINTS: { x: number; y: number; w: number; h: number; color: number; alpha: number }[] = [
-  { x: 240, y: 240, w: 1200, h: 960, color: 0x2a3550, alpha: 0.12 }, // parking — cold blue
-  { x: 3120, y: 180, w: 2700, h: 960, color: 0x403018, alpha: 0.1 }, // grand hall — warm
-  { x: 7200, y: 300, w: 1260, h: 960, color: 0x33291f, alpha: 0.12 }, // warehouse — cardboard
-  { x: 1680, y: 1260, w: 1200, h: 1440, color: 0x2e2a22, alpha: 0.12 }, // office cluster
-  { x: 6000, y: 1260, w: 1320, h: 1620, color: 0x203038, alpha: 0.12 }, // medical — clinical
-  { x: 600, y: 2880, w: 7800, h: 720, color: 0x101c16, alpha: 0.32 }, // sewers — rotten dark
-  { x: 480, y: 2760, w: 1200, h: 840, color: 0x2c2318, alpha: 0.22 }, // cave collapse — earth
-  { x: 7560, y: 3000, w: 780, h: 600, color: 0x3a2f16, alpha: 0.18 }, // generator — amber
+  { x: 240, y: 240, w: 1080, h: 960, color: 0x2a3550, alpha: 0.13 }, // parking — cold blue
+  { x: 2400, y: 240, w: 3960, h: 960, color: 0x403018, alpha: 0.1 }, // grand hall — warm
+  { x: 7320, y: 240, w: 1080, h: 960, color: 0x33291f, alpha: 0.13 }, // warehouse — cardboard
+  { x: 240, y: 1380, w: 2640, h: 1140, color: 0x1f3a2a, alpha: 0.12 }, // west wing — sickly green
+  { x: 5760, y: 1380, w: 2640, h: 1140, color: 0x203038, alpha: 0.12 }, // east wing — clinical
+  { x: 480, y: 2760, w: 7920, h: 420, color: 0x101c16, alpha: 0.34 }, // sewer — rotten dark
+  { x: 480, y: 3120, w: 1200, h: 600, color: 0x2c2318, alpha: 0.24 }, // cave collapse — earth
+  { x: 6960, y: 3120, w: 1440, h: 600, color: 0x3a2f16, alpha: 0.2 }, // generator — amber
 ];
 
 interface SpriteItem {

@@ -23,7 +23,7 @@ describe('map + doors', () => {
     expect(m.doors.every((d) => !d.open)).toBe(true); // all start closed
     expect(m.doors.some((d) => d.minWave >= 2)).toBe(true); // gates exist
     expect(m.spawnZones.some((z) => (z.minWave ?? 0) <= 1)).toBe(true); // wave-1 pressure exists
-    expect(m.spawnZones.length).toBeGreaterThanOrEqual(15);
+    expect(m.spawnZones.length).toBeGreaterThanOrEqual(10);
   });
 
   it('no spawn zone or the player start is buried in rock', () => {
