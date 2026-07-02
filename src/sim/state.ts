@@ -1,5 +1,5 @@
-import { PLAYER_MAX_HP } from '../config';
-import type { GameState, PlayerInput, PlayerState, Wall } from './types';
+import { PLAYER_MAX_HP, WAVE_INTERMISSION } from '../config';
+import type { GameState, PlayerInput, PlayerState, SpawnZone, Wall } from './types';
 
 export function createPlayer(x: number, y: number): PlayerState {
   return {
@@ -13,13 +13,25 @@ export function createPlayer(x: number, y: number): PlayerState {
   };
 }
 
-export function createGameState(walls: Wall[]): GameState {
+export function createGameState(walls: Wall[], spawnZones: SpawnZone[] = []): GameState {
   return {
     time: 0,
     player: createPlayer(480, 270),
     bullets: [],
     nextBulletId: 1,
+    enemies: [],
+    nextEnemyId: 1,
+    wave: {
+      index: 1,
+      phase: 'intermission', // start with a short breather before wave 1
+      timer: WAVE_INTERMISSION,
+      spawnQueue: [],
+      spawnCooldown: 0,
+      killsThisWave: 0,
+    },
+    spawnZones: [...spawnZones],
     walls: [...walls], // copy: each GameState must be an independent snapshot (netcode)
+    gameOver: false,
   };
 }
 
