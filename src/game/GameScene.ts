@@ -79,6 +79,7 @@ export class GameScene extends Phaser.Scene {
   private loop = new FixedLoop(SIM_DT);
   private inputCollector!: InputCollector;
   private playerSprite!: Phaser.GameObjects.Image;
+  private heldWeapon!: Phaser.GameObjects.Image; // the equipped weapon in the player's hands
   private meleeArc!: Phaser.GameObjects.Arc;
   private doorSprites: Phaser.GameObjects.Image[] = [];
   private bulletShapes = new Map<number, Phaser.GameObjects.Arc>();
@@ -149,6 +150,13 @@ export class GameScene extends Phaser.Scene {
       this.state.wave.index = debugWave;
       this.state.wave.timer = 0.8;
     }
+    const wpn = qs.get('wpn');
+    if (wpn && wpn in WEAPONS) {
+      const id = wpn as keyof typeof WEAPONS;
+      if (!this.state.player.owned.includes(id)) this.state.player.owned.push(id);
+      this.state.player.weapon = id;
+      this.state.player.ammo[id] = 999;
+    }
     if (qs.get('zoo')) {
       const types = ['shambler', 'runner', 'brute', 'bloater', 'screamer'] as const;
       types.forEach((t, i) =>
@@ -193,6 +201,8 @@ export class GameScene extends Phaser.Scene {
     this.meleeArc = this.add.circle(0, 0, 60, COLORS.melee, 0.25).setVisible(false);
     this.playerSprite = this.add.image(0, 0, 'player');
     this.setSpriteHeight(this.playerSprite, PLAYER_RADIUS * 4.2);
+    // Held weapon: pivots at its grip so it extends forward from the hands.
+    this.heldWeapon = this.add.image(0, 0, 'wpn_pistol').setOrigin(0.16, 0.5);
     this.inputCollector = new InputCollector(this);
 
     // Darkness overlay: fill a screen-sized render texture pinned to the camera,
@@ -469,6 +479,16 @@ export class GameScene extends Phaser.Scene {
     this.playerSprite.setPosition(x + kx, y + ky).setRotation(p.aimAngle - ART_FACING);
     if (p.dash.timeLeft > 0) this.playerSprite.setTint(COLORS.dashTint);
     else this.playerSprite.clearTint();
+
+    // Held weapon in the hands, pointing where the player aims (melee held bigger).
+    const wdef = WEAPONS[p.weapon];
+    const held = wdef.kind === 'melee' ? 26 : 20;
+    const hand = wdef.kind === 'melee' ? 6 : 13;
+    this.heldWeapon
+      .setTexture(`wpn_${p.weapon}`)
+      .setPosition(x + kx + Math.cos(p.aimAngle) * hand, y + ky + Math.sin(p.aimAngle) * hand)
+      .setRotation(p.aimAngle);
+    this.setSpriteHeight(this.heldWeapon, held);
 
     // Dash ghost trail.
     if (p.dash.timeLeft > 0) {
