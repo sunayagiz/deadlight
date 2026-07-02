@@ -38,6 +38,17 @@ export interface BulletState {
   damage: number;
 }
 
+export type EnemyType = 'shambler' | 'runner' | 'brute';
+
+export interface EnemyState {
+  id: number;
+  type: EnemyType;
+  pos: Vec2;
+  vel: Vec2;
+  hp: number;
+  hitFlash: number; // seconds of hit-flash left — pure view hint, still part of sim state
+}
+
 /** Axis-aligned solid rectangle. */
 export interface Wall {
   x: number;
@@ -46,11 +57,33 @@ export interface Wall {
   h: number;
 }
 
+/** Where enemies enter the map. Never spawn on top of the players. */
+export interface SpawnZone {
+  x: number;
+  y: number;
+}
+
+export type WavePhase = 'intermission' | 'active';
+
+export interface WaveState {
+  index: number; // 1-based; the wave currently running or being counted down to
+  phase: WavePhase;
+  timer: number; // seconds left in the current intermission (unused while active)
+  spawnQueue: EnemyType[]; // enemies still to spawn this wave
+  spawnCooldown: number; // seconds until the next spawn
+  killsThisWave: number;
+}
+
 /** Serializable plain data — this is what will go over the wire in the netcode slice. */
 export interface GameState {
   time: number; // seconds
   player: PlayerState;
   bullets: BulletState[];
   nextBulletId: number;
+  enemies: EnemyState[];
+  nextEnemyId: number;
+  wave: WaveState;
+  spawnZones: SpawnZone[];
   walls: Wall[];
+  gameOver: boolean;
 }

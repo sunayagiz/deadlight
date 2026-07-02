@@ -1,4 +1,4 @@
-import type { Wall } from './types';
+import type { SpawnZone, Wall } from './types';
 
 /** Hardcoded 960×540 test room. Replaced by Tiled maps in the map-vision slice. */
 export function testRoomWalls(): Wall[] {
@@ -9,5 +9,15 @@ export function testRoomWalls(): Wall[] {
     { x: 936, y: 0, w: 24, h: 540 }, // right
     { x: 420, y: 220, w: 120, h: 32 }, // center obstacle
     { x: 200, y: 360, w: 32, h: 120 }, // lower-left pillar
+  ];
+}
+
+/** Corner spawn points, away from the player's start at (480, 270). */
+export function testRoomSpawnZones(): SpawnZone[] {
+  return [
+    { x: 60, y: 60 },
+    { x: 900, y: 60 },
+    { x: 60, y: 480 },
+    { x: 900, y: 480 },
   ];
 }
