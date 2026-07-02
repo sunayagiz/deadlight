@@ -19,3 +19,8 @@ export const WAVE_BUDGET_GROWTH = 3; // added per wave index
 export const WAVE_SPAWN_INTERVAL = 0.45; // s between spawns within a wave
 export const WAVE_INTERMISSION = 6; // s of calm between waves
 export const BRUTE_MIN_WAVE = 3; // brutes only from this wave on
+
+// --- Loot ---
+export const LOOT_DROP_CHANCE = 0.22; // chance a killed enemy drops something
+export const LOOT_TTL = 15; // s before a dropped item despawns
+export const LOOT_RADIUS = 12; // px pickup range (plus the player radius)

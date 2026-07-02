@@ -8,6 +8,10 @@ export function createPlayer(x: number, y: number): PlayerState {
     aimAngle: 0,
     hp: PLAYER_MAX_HP,
     weapon: 'pistol',
+    owned: ['pistol', 'katana'], // start with a sidearm and a blade; find the rest as loot
+    ammo: {},
+    spin: 0,
+    meleeSwing: 0,
     fireCooldown: 0,
     dash: { timeLeft: 0, cooldownLeft: 0, dirX: 1, dirY: 0 },
   };
@@ -21,6 +25,8 @@ export function createGameState(walls: Wall[], spawnZones: SpawnZone[] = []): Ga
     nextBulletId: 1,
     enemies: [],
     nextEnemyId: 1,
+    loot: [],
+    nextLootId: 1,
     wave: {
       index: 1,
       phase: 'intermission', // start with a short breather before wave 1

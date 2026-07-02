@@ -13,15 +13,30 @@ export interface PlayerInput {
   dash: boolean;
 }
 
-export type WeaponId = 'pistol';
+export type WeaponId =
+  | 'pistol'
+  | 'smg'
+  | 'shotgun'
+  | 'machinegun'
+  | 'minigun'
+  | 'rpg'
+  | 'katana'
+  | 'bat'
+  | 'chainsaw';
+
+export type WeaponKind = 'gun' | 'rpg' | 'melee';
 
 export interface PlayerState {
   pos: Vec2;
   vel: Vec2;
   aimAngle: number; // radians
   hp: number;
-  weapon: WeaponId;
-  fireCooldown: number; // seconds until next shot allowed
+  weapon: WeaponId; // currently equipped
+  owned: WeaponId[]; // everything the player can switch to
+  ammo: Record<string, number>; // reserve for limited weapons; absent = infinite
+  spin: number; // minigun spin-up, 0..1
+  meleeSwing: number; // seconds left in the current melee swing (view + re-hit gate)
+  fireCooldown: number; // seconds until next shot/swing allowed
   dash: {
     timeLeft: number; // >0 means currently dashing (i-frames)
     cooldownLeft: number;
@@ -36,6 +51,17 @@ export interface BulletState {
   vel: Vec2;
   ttl: number; // seconds
   damage: number;
+  splashRadius: number; // 0 = non-explosive
+  splashDamage: number;
+}
+
+export interface LootState {
+  id: number;
+  pos: Vec2;
+  kind: 'weapon' | 'ammo';
+  weapon: WeaponId; // which weapon this grants, or which weapon's ammo
+  amount: number; // ammo count (ignored for weapon pickups)
+  ttl: number; // seconds before it despawns
 }
 
 export type EnemyType = 'shambler' | 'runner' | 'brute';
@@ -82,6 +108,8 @@ export interface GameState {
   nextBulletId: number;
   enemies: EnemyState[];
   nextEnemyId: number;
+  loot: LootState[];
+  nextLootId: number;
   wave: WaveState;
   spawnZones: SpawnZone[];
   walls: Wall[];

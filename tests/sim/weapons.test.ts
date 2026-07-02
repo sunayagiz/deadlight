@@ -47,7 +47,7 @@ describe('weapons', () => {
   it('bullets expire after ttl', () => {
     const s = createGameState([]);
     stepSim(s, { ...emptyInput(), fire: true, aimWorldX: 999, aimWorldY: 0 }, SIM_DT);
-    const ticks = Math.ceil(WEAPONS.pistol.bulletTtl / SIM_DT) + 1;
+    const ticks = Math.ceil(WEAPONS.pistol.bulletTtl! / SIM_DT) + 1;
     for (let i = 0; i < ticks; i++) stepSim(s, emptyInput(), SIM_DT);
     expect(s.bullets).toHaveLength(0);
   });
