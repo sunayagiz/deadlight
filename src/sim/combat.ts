@@ -48,17 +48,33 @@ function explode(state: GameState, at: Vec2, radius: number, damage: number): vo
  */
 export function updateCombat(state: GameState, dt: number, rng: () => number = Math.random): void {
   const solids = mapSolids(state);
+  const p = state.player;
   const surviving: BulletState[] = [];
   for (const b of state.bullets) {
-    const hit = firstEnemyHit(state, b);
     const blocked = insideWall(b.pos, solids);
     const expired = b.ttl <= 0;
+    let struck = false;
 
-    if (hit) {
-      hit.hp -= b.damage;
-      hit.hitFlash = HIT_FLASH;
+    if (b.hostile) {
+      // Enemy projectile: hits the player, but dash i-frames let it pass through (dodge).
+      if (p.hp > 0 && !isInvulnerable(p)) {
+        const dx = b.pos.x - p.pos.x;
+        const dy = b.pos.y - p.pos.y;
+        if (dx * dx + dy * dy <= PLAYER_RADIUS * PLAYER_RADIUS) {
+          p.hp -= b.damage;
+          struck = true;
+        }
+      }
+    } else {
+      const hit = firstEnemyHit(state, b);
+      if (hit) {
+        hit.hp -= b.damage;
+        hit.hitFlash = HIT_FLASH;
+        struck = true;
+      }
     }
-    if (hit || blocked || expired) {
+
+    if (struck || blocked || expired) {
       if (b.splashRadius > 0) explode(state, b.pos, b.splashRadius, b.splashDamage);
       continue; // bullet consumed
     }
@@ -79,7 +95,6 @@ export function updateCombat(state: GameState, dt: number, rng: () => number = M
   state.enemies = alive;
 
   // Enemy contact damage (DPS) — dash i-frames make the player immune.
-  const p = state.player;
   if (p.hp > 0 && !isInvulnerable(p)) {
     for (const e of state.enemies) {
       const def = ZOMBIES[e.type];

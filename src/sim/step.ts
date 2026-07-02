@@ -1,3 +1,4 @@
+import { updateBosses } from './bosses';
 import { updateCombat } from './combat';
 import { updateEnemies } from './enemies';
 import { updateLoot } from './loot';
@@ -26,6 +27,7 @@ export function stepSim(
   updateAim(state.player, input);
   updateFiring(state, input, dt, rng);
   updateEnemies(state.enemies, state.player, solids, dt);
+  updateBosses(state, dt, rng);
   updateMelee(state, input, dt);
   updateBullets(state, dt);
   updateCombat(state, dt, rng);

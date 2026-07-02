@@ -30,8 +30,11 @@ const COLORS = {
   flash: 0xfff2c0,
   boom: 0xffb347,
   hitFlash: 0xffffff,
+  telegraph: 0xffb0b0, // boss wind-up warning
   hpBack: 0x3a0d0d,
   hpFill: 0xc23b3b,
+  bossBarBack: 0x33111a,
+  bossBarFill: 0xd23b5a,
   melee: 0xe8eaed,
   lootWeapon: 0xf2c14e,
   lootAmmo: 0x4ec3f2,
@@ -41,6 +44,8 @@ const ENEMY_COLORS: Record<EnemyType, number> = {
   shambler: 0x6b8f5a, // sickly green
   runner: 0xb0894a, // wiry tan
   brute: 0x8a3f6b, // bruised purple
+  bloater: 0x4a7d3a, // swollen green
+  screamer: 0xa8324f, // raw red
 };
 
 const DEPTH_DARK = 10;
@@ -64,6 +69,9 @@ export class GameScene extends Phaser.Scene {
   private hpFill!: Phaser.GameObjects.Rectangle;
   private hud!: Phaser.GameObjects.Text;
   private weaponHud!: Phaser.GameObjects.Text;
+  private bossBarBack!: Phaser.GameObjects.Rectangle;
+  private bossBarFill!: Phaser.GameObjects.Rectangle;
+  private bossLabel!: Phaser.GameObjects.Text;
   private overlay?: Phaser.GameObjects.Text;
 
   constructor() {
@@ -119,6 +127,25 @@ export class GameScene extends Phaser.Scene {
       .text(16, 512, '', { fontFamily: 'monospace', fontSize: '14px', color: '#f2c14e' })
       .setScrollFactor(0)
       .setDepth(DEPTH_HUD);
+
+    // Boss health bar (shown only while a boss is alive).
+    this.bossBarBack = this.add
+      .rectangle(480, 26, 380, 12, COLORS.bossBarBack)
+      .setScrollFactor(0)
+      .setDepth(DEPTH_HUD)
+      .setVisible(false);
+    this.bossBarFill = this.add
+      .rectangle(480 - 190, 26, 380, 12, COLORS.bossBarFill)
+      .setOrigin(0, 0.5)
+      .setScrollFactor(0)
+      .setDepth(DEPTH_HUD)
+      .setVisible(false);
+    this.bossLabel = this.add
+      .text(480, 38, '', { fontFamily: 'monospace', fontSize: '12px', color: '#e8b0bd' })
+      .setOrigin(0.5, 0)
+      .setScrollFactor(0)
+      .setDepth(DEPTH_HUD)
+      .setVisible(false);
   }
 
   update(_time: number, deltaMs: number): void {
@@ -199,7 +226,12 @@ export class GameScene extends Phaser.Scene {
         x: e.pos.x,
         y: e.pos.y,
         r: ZOMBIES[e.type].radius,
-        color: e.hitFlash > 0 ? COLORS.hitFlash : ENEMY_COLORS[e.type],
+        color:
+          e.boss && e.boss.telegraph > 0
+            ? COLORS.telegraph
+            : e.hitFlash > 0
+              ? COLORS.hitFlash
+              : ENEMY_COLORS[e.type],
         visible: segmentClear(eye, e.pos, solids),
       })),
     );
@@ -223,6 +255,20 @@ export class GameScene extends Phaser.Scene {
     const ammo = def.startAmmo === undefined ? '∞' : String(Math.ceil(p.ammo[def.id] ?? 0));
     const slots = p.owned.map((id, i) => `${i + 1}:${WEAPONS[id].name}${id === p.weapon ? '*' : ''}`).join('  ');
     this.weaponHud.setText(`${def.name}  [${ammo}]     ${slots}`);
+
+    const boss = this.state.enemies.find((e) => e.boss);
+    if (boss) {
+      const bdef = ZOMBIES[boss.type];
+      this.bossBarFill.width = 380 * Math.max(0, boss.hp / bdef.hp);
+      this.bossLabel.setText(bdef.name.toUpperCase());
+      this.bossBarBack.setVisible(true);
+      this.bossBarFill.setVisible(true);
+      this.bossLabel.setVisible(true);
+    } else if (this.bossBarBack.visible) {
+      this.bossBarBack.setVisible(false);
+      this.bossBarFill.setVisible(false);
+      this.bossLabel.setVisible(false);
+    }
 
     if (this.state.gameOver && !this.overlay) {
       this.overlay = this.add

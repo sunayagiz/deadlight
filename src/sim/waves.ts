@@ -1,4 +1,5 @@
 import {
+  BOSS_WAVE_INTERVAL,
   BRUTE_MIN_WAVE,
   WAVE_BUDGET_BASE,
   WAVE_BUDGET_GROWTH,
@@ -7,6 +8,15 @@ import {
 } from '../config';
 import { ZOMBIES, spawnEnemy } from './enemies';
 import type { EnemyType, GameState, SpawnZone } from './types';
+
+export function isBossWave(index: number): boolean {
+  return index % BOSS_WAVE_INTERVAL === 0;
+}
+
+/** Alternate the two bosses: 1st boss wave = bloater, 2nd = screamer, ... */
+export function bossForWave(index: number): EnemyType {
+  return (index / BOSS_WAVE_INTERVAL) % 2 === 1 ? 'bloater' : 'screamer';
+}
 
 /** Deterministic when a seeded rng is passed; defaults to Math.random for the live game. */
 export type Rng = () => number;
@@ -47,6 +57,9 @@ function startWave(state: GameState, rng: Rng): void {
   wave.spawnQueue = buildWaveQueue(wave.index, rng);
   wave.spawnCooldown = 0; // first enemy spawns on the next tick
   wave.killsThisWave = 0;
+  if (isBossWave(wave.index)) {
+    spawnEnemy(state, bossForWave(wave.index), pickZone(state, rng)); // boss enters alongside the wave
+  }
 }
 
 export function updateWaves(state: GameState, dt: number, rng: Rng = Math.random): void {

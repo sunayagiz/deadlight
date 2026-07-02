@@ -95,6 +95,7 @@ export function updateFiring(
       damage: def.damage,
       splashRadius: def.splashRadius ?? 0,
       splashDamage: def.splashDamage ?? 0,
+      hostile: false,
     });
   }
   if (def.startAmmo !== undefined) p.ammo[def.id] = (p.ammo[def.id] ?? 0) - 1;
