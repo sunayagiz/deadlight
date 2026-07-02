@@ -103,7 +103,10 @@ export class GameScene extends Phaser.Scene {
   private prevMeleeSwing = 0;
   private prevDashLeft = 0;
   private heartbeat?: Phaser.Sound.BaseSound;
-  private minimapG!: Phaser.GameObjects.Graphics;
+  private minimapG!: Phaser.GameObjects.Graphics; // static part: walls/doors/fog
+  private minimapDot!: Phaser.GameObjects.Graphics; // per-frame player dot
+  private explored = new Set<number>(); // fog-of-war cells the player has seen
+  private minimapDirty = true;
   private mapW = 960;
   private mapH = 540;
   private hpFill!: Phaser.GameObjects.Rectangle;
@@ -248,8 +251,11 @@ export class GameScene extends Phaser.Scene {
     this.prevHp = this.state.player.hp;
     this.prevWavePhase = this.state.wave.phase;
 
-    // Minimap (top-right): walls + doors + player, redrawn per frame.
+    // Minimap (top-right): fogged — only explored areas show; player dot on top.
     this.minimapG = this.add.graphics().setScrollFactor(0).setDepth(DEPTH_HUD);
+    this.minimapDot = this.add.graphics().setScrollFactor(0).setDepth(DEPTH_HUD);
+    this.explored.clear(); // fresh fog on (re)start
+    this.minimapDirty = true;
 
     // R restarts after death.
     this.input.keyboard!.on('keydown-R', () => {
@@ -319,9 +325,12 @@ export class GameScene extends Phaser.Scene {
       this.prevWavePhase = phase;
     }
 
-    // doors opening → creak
+    // doors opening → creak + minimap update
     const open = this.state.doors.filter((d) => d.open).length;
-    if (open > this.prevOpenDoors) this.sfx('door', 0.6);
+    if (open > this.prevOpenDoors) {
+      this.sfx('door', 0.6);
+      this.minimapDirty = true;
+    }
     this.prevOpenDoors = open;
 
     // melee swing / dash start → whoosh
@@ -363,26 +372,66 @@ export class GameScene extends Phaser.Scene {
     this.tweens.add({ targets: t, alpha: 1, duration: 250, yoyo: true, hold: 1100, onComplete: () => t.destroy() });
   }
 
-  /** Corner minimap: walls, doors, player. Enemies stay hidden (fog). */
+  private static readonly FOG_CELL = 160; // px of world per fog cell
+
+  /**
+   * Corner minimap with fog of war: walls/doors appear only where the player
+   * has actually been; the rest stays in shadow. Static layer redraws only
+   * when exploration or doors change; the player dot updates every frame.
+   */
   private drawMinimap(): void {
-    const g = this.minimapG;
     const scale = 200 / this.mapW;
     const mx = 960 - 216;
     const my = 14;
-    g.clear();
-    g.fillStyle(0x05060a, 0.55);
-    g.fillRect(mx - 4, my - 4, 208 + 8, this.mapH * scale + 8);
-    g.fillStyle(0x555b66, 0.9);
-    for (const w of this.state.walls) {
-      g.fillRect(mx + w.x * scale, my + w.y * scale, Math.max(1, w.w * scale), Math.max(1, w.h * scale));
-    }
-    for (const d of this.state.doors) {
-      g.fillStyle(d.open ? 0x3a4a3a : 0x8a5a2a, 1);
-      g.fillRect(mx + d.x * scale, my + d.y * scale, Math.max(2, d.w * scale), Math.max(2, d.h * scale));
-    }
-    g.fillStyle(0xe8eaed, 1);
+    const cell = GameScene.FOG_CELL;
+    const cols = Math.ceil(this.mapW / cell);
+    const rows = Math.ceil(this.mapH / cell);
+
+    // reveal fog cells around the player (~1.5 cell radius)
     const p = this.state.player;
-    g.fillCircle(mx + p.pos.x * scale, my + p.pos.y * scale, 2.4);
+    const pcx = Math.floor(p.pos.x / cell);
+    const pcy = Math.floor(p.pos.y / cell);
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const cx = pcx + dx;
+        const cy = pcy + dy;
+        if (cx < 0 || cy < 0 || cx >= cols || cy >= rows) continue;
+        const i = cy * cols + cx;
+        if (!this.explored.has(i)) {
+          this.explored.add(i);
+          this.minimapDirty = true;
+        }
+      }
+    }
+
+    if (this.minimapDirty) {
+      this.minimapDirty = false;
+      const g = this.minimapG;
+      g.clear();
+      g.fillStyle(0x05060a, 0.72);
+      g.fillRect(mx - 4, my - 4, 208 + 8, this.mapH * scale + 8);
+      g.fillStyle(0x555b66, 0.9);
+      for (const w of this.state.walls) {
+        g.fillRect(mx + w.x * scale, my + w.y * scale, Math.max(1, w.w * scale), Math.max(1, w.h * scale));
+      }
+      for (const d of this.state.doors) {
+        g.fillStyle(d.open ? 0x3a4a3a : 0x8a5a2a, 1);
+        g.fillRect(mx + d.x * scale, my + d.y * scale, Math.max(2, d.w * scale), Math.max(2, d.h * scale));
+      }
+      // shadow every unexplored cell back out
+      g.fillStyle(0x05060a, 0.93);
+      const cw = cell * scale;
+      for (let cy = 0; cy < rows; cy++) {
+        for (let cx = 0; cx < cols; cx++) {
+          if (this.explored.has(cy * cols + cx)) continue;
+          g.fillRect(mx + cx * cw, my + cy * cw, cw + 0.5, cw + 0.5);
+        }
+      }
+    }
+
+    this.minimapDot.clear();
+    this.minimapDot.fillStyle(0xe8eaed, 1);
+    this.minimapDot.fillCircle(mx + p.pos.x * scale, my + p.pos.y * scale, 2.4);
   }
 
   private renderState(alpha: number, dt: number): void {
