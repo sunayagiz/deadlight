@@ -374,7 +374,7 @@ export class GameScene extends Phaser.Scene {
     if (p.dash.timeLeft > this.prevDashLeft + 0.05) this.sfx('whoosh', 0.3, 1.4);
     this.prevDashLeft = p.dash.timeLeft;
 
-    // fresh bullet hits → squelch + blood spurt (cap one sound per frame)
+    // fresh bullet hits → squelch + arterial spray (cap one sound per frame)
     let squelched = false;
     for (const e of this.state.enemies) {
       if (e.hitFlash > 0.065) {
@@ -382,18 +382,61 @@ export class GameScene extends Phaser.Scene {
           this.sfx('squelch', 0.5, 0.9 + Math.random() * 0.3);
           squelched = true;
         }
-        for (let i = 0; i < 2; i++) {
-          const drop = this.add.circle(e.pos.x, e.pos.y, 2.5, 0x7a1616, 0.9);
+        const dir = Math.atan2(e.vel.y, e.vel.x) + Math.PI; // roughly away from the shot
+        for (let i = 0; i < 6; i++) {
+          const a = dir + (Math.random() - 0.5) * 2.4;
+          const dist = 20 + Math.random() * 44;
+          const drop = this.add.circle(e.pos.x, e.pos.y, 1.6 + Math.random() * 2.4, 0x8a1414, 0.92).setDepth(1);
           this.tweens.add({
             targets: drop,
-            x: e.pos.x + (Math.random() - 0.5) * 46,
-            y: e.pos.y + (Math.random() - 0.5) * 46,
+            x: e.pos.x + Math.cos(a) * dist,
+            y: e.pos.y + Math.sin(a) * dist,
             alpha: 0,
-            duration: 240,
+            duration: 220 + Math.random() * 160,
             onComplete: () => drop.destroy(),
           });
         }
+        // a lingering droplet stains the floor
+        if (Math.random() < 0.5) this.stainFloor(e.pos.x + (Math.random() - 0.5) * 30, e.pos.y + (Math.random() - 0.5) * 30, 3);
       }
+    }
+  }
+
+  /** A small permanent-ish blood stain on the floor (capped pool). */
+  private stainFloor(x: number, y: number, r: number): void {
+    const s = this.add.circle(x, y, r, 0x5a0e10, 0.7).setDepth(DEPTH_BLOOD);
+    this.bloodDecals.push(s as unknown as Phaser.GameObjects.Image);
+    if (this.bloodDecals.length > 160) this.bloodDecals.shift()!.destroy();
+  }
+
+  /** Death gore: a pool + flying flesh/bone gibs. */
+  private spawnGore(x: number, y: number): void {
+    const pool = this.add.image(x, y, 'blood').setDepth(DEPTH_BLOOD).setAlpha(0.85).setRotation(Math.random() * 6.28);
+    this.setSpriteHeight(pool, 40 + Math.random() * 24);
+    this.bloodDecals.push(pool);
+    if (this.bloodDecals.length > 160) this.bloodDecals.shift()!.destroy();
+    for (let i = 0; i < 9; i++) {
+      const a = Math.random() * 6.28;
+      const dist = 24 + Math.random() * 60;
+      const bone = Math.random() < 0.3;
+      const gib = this.add
+        .circle(x, y, 1.8 + Math.random() * 3, bone ? 0xcfc7a8 : 0x6e1012, 0.95)
+        .setDepth(2);
+      this.tweens.add({
+        targets: gib,
+        x: x + Math.cos(a) * dist,
+        y: y + Math.sin(a) * dist,
+        scale: 0.4,
+        duration: 260 + Math.random() * 220,
+        ease: 'Quad.easeOut',
+        onComplete: () => {
+          if (bone) gib.destroy();
+          else {
+            gib.setDepth(DEPTH_BLOOD); // flesh chunks settle as stains
+            this.bloodDecals.push(gib as unknown as Phaser.GameObjects.Image);
+          }
+        },
+      });
     }
   }
 
@@ -600,16 +643,16 @@ export class GameScene extends Phaser.Scene {
         wobble: e.boss ? 0.05 : 0.11, // shamble sway; heavier bodies sway less
       })),
       (lastX, lastY, id, img) => {
-        this.spawnBlood(lastX, lastY, id);
-        // corpse: the sprite stays behind, darkened, and slowly soaks away
+        this.spawnGore(lastX, lastY); // pool + flying flesh/bone gibs
+        // corpse: the sprite stays behind, blood-darkened, and slowly soaks away
         const corpse = this.add
           .image(lastX, lastY, img.texture.key)
-          .setRotation(img.rotation + 0.5)
-          .setTint(0x2c2c30)
-          .setAlpha(0.85)
+          .setRotation(img.rotation + (Math.random() - 0.5))
+          .setTint(0x3a1416)
+          .setAlpha(0.9)
           .setDepth(DEPTH_BLOOD + 0.1);
         corpse.setDisplaySize(img.displayWidth, img.displayHeight);
-        this.tweens.add({ targets: corpse, alpha: 0, duration: 9000, onComplete: () => corpse.destroy() });
+        this.tweens.add({ targets: corpse, alpha: 0, duration: 11000, onComplete: () => corpse.destroy() });
       },
     );
 
@@ -672,17 +715,6 @@ export class GameScene extends Phaser.Scene {
   private setSpriteHeight(img: Phaser.GameObjects.Image, height: number): void {
     const src = img.texture.getSourceImage();
     img.setDisplaySize((src.width / src.height) * height, height);
-  }
-
-  private spawnBlood(x: number, y: number, id: number): void {
-    const blood = this.add
-      .image(x, y, 'blood')
-      .setDepth(DEPTH_BLOOD)
-      .setAlpha(0.75)
-      .setRotation(((id * 137) % 360) * (Math.PI / 180));
-    this.setSpriteHeight(blood, 34 + ((id * 53) % 28));
-    this.bloodDecals.push(blood);
-    if (this.bloodDecals.length > 80) this.bloodDecals.shift()!.destroy();
   }
 
   private trackExplosions(): void {
