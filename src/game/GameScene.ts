@@ -30,8 +30,8 @@ const COLORS = {
   bossBarFill: 0xd23b5a,
 };
 
-/** All character art faces "down" (south, +y) at rotation 0. */
-const ART_FACING = Math.PI / 2;
+/** All character art faces east (+x) at rotation 0 — same as aimAngle 0. */
+const ART_FACING = 0;
 
 const DEPTH_FLOOR = -3;
 const DEPTH_BLOOD = -2;
@@ -259,6 +259,17 @@ export class GameScene extends Phaser.Scene {
     this.minimapDot = this.add.graphics().setScrollFactor(0).setDepth(DEPTH_HUD);
     this.explored.clear(); // fresh fog on (re)start
     this.minimapDirty = true;
+
+    // Looping ambient bed — loaded AFTER create so a slow audio decode never
+    // blocks the game from rendering; plays once decoded + audio is unlocked.
+    const startMusic = () => {
+      if (this.sound.locked || !this.cache.audio.exists('music') || this.sound.get('music')) return;
+      this.sound.play('music', { loop: true, volume: 0.35 });
+    };
+    this.load.audio('music', '/assets/audio/music.wav');
+    this.load.once(Phaser.Loader.Events.COMPLETE, startMusic);
+    this.load.start();
+    this.sound.once(Phaser.Sound.Events.UNLOCKED, startMusic);
 
     // R restarts after death.
     this.input.keyboard!.on('keydown-R', () => {
