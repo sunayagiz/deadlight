@@ -14,9 +14,15 @@ import { stepSim } from '../sim/step';
 import { lerp } from '../sim/vec';
 import { segmentClear } from '../sim/vision';
 import { WEAPONS, cycleWeapon, equipWeapon } from '../sim/weapons';
-import type { EnemyType, GameState } from '../sim/types';
+import type { EnemyType, GameState, PlayerState } from '../sim/types';
+import type { GuestNet, HostNet } from '../net/net';
+import { applySnapshot, snapshot } from '../net/protocol';
+import { getSession } from '../net/session';
 import { InputCollector } from './input';
 import { FixedLoop } from './loop';
+
+/** Per-slot accent so teammates are distinguishable. */
+const TEAM_TINT = [0xffffff, 0x6fb8ff, 0xffd45e, 0x8affa0];
 
 const COLORS = {
   bullet: 0xffe08a,
@@ -92,8 +98,15 @@ export class GameScene extends Phaser.Scene {
   private state!: GameState;
   private loop = new FixedLoop(SIM_DT);
   private inputCollector!: InputCollector;
-  private playerSprite!: Phaser.GameObjects.Image;
-  private heldWeapon!: Phaser.GameObjects.Image; // the equipped weapon in the player's hands
+  private role: 'solo' | 'host' | 'guest' = 'solo';
+  private localIndex = 0;
+  private hostNet?: HostNet;
+  private guestNet?: GuestNet;
+  private camTarget!: Phaser.GameObjects.Image; // invisible; camera follows it
+  private playerBodies = new Map<number, Phaser.GameObjects.Image>();
+  private playerWeapons = new Map<number, Phaser.GameObjects.Image>();
+  private reviveRings = new Map<number, Phaser.GameObjects.Arc>();
+  private prevLocalFireCd = 0;
   private meleeArc!: Phaser.GameObjects.Arc;
   private doorSprites: Phaser.GameObjects.Image[] = [];
   private bulletShapes = new Map<number, Phaser.GameObjects.Arc>();
@@ -139,20 +152,49 @@ export class GameScene extends Phaser.Scene {
   }
 
   preload(): void {
+    // Only images block first render; audio is loaded in the background after
+    // create() so a slow/stalled audio decode can never keep the game black.
     for (const key of ASSETS) this.load.image(key, `/assets/${key}.png`);
+  }
+
+  /** Load all sound assets in the background; play the music bed once ready. */
+  private loadAudioDeferred(): void {
     for (const key of SOUNDS) this.load.audio(key, `/assets/audio/${key}.wav`);
+    this.load.audio('music', '/assets/audio/music.wav');
+    const startMusic = () => {
+      if (this.sound.locked || !this.cache.audio.exists('music') || this.sound.get('music')) return;
+      this.sound.play('music', { loop: true, volume: 0.35 });
+    };
+    this.load.once(Phaser.Loader.Events.COMPLETE, startMusic);
+    this.sound.once(Phaser.Sound.Events.UNLOCKED, startMusic);
+    this.load.start();
   }
 
   private sfx(key: (typeof SOUNDS)[number], volume = 0.5, rate = 1): void {
-    this.sound.play(key, { volume, rate });
+    if (this.cache.audio.exists(key)) this.sound.play(key, { volume, rate }); // skip until loaded
   }
 
   create(): void {
     const map = buildMap();
-    this.state = createGameState(map.walls, map.spawnZones, map.doors, map.playerStart, {
-      width: map.width,
-      height: map.height,
-    });
+    const session = getSession();
+    this.role = session.role;
+    if (session.role === 'host') {
+      this.hostNet = session.net;
+      this.localIndex = 0;
+    } else if (session.role === 'guest') {
+      this.guestNet = session.net;
+      this.localIndex = session.you;
+    }
+    const numPlayers = session.role === 'host' ? session.players : session.role === 'guest' ? 4 : 1;
+    this.state = createGameState(
+      map.walls,
+      map.spawnZones,
+      map.doors,
+      map.playerStart,
+      { width: map.width, height: map.height },
+      numPlayers,
+    );
+    if (session.role === 'guest') this.state.players.forEach((p, i) => (p.alive = i === this.localIndex));
 
     // Debug/playtest: ?wave=N jumps straight to wave N with a short countdown;
     // ?zoo=1 lines up one of every enemy type; ?at=x,y teleports the start.
@@ -215,10 +257,8 @@ export class GameScene extends Phaser.Scene {
     });
 
     this.meleeArc = this.add.circle(0, 0, 60, COLORS.melee, 0.25).setVisible(false);
-    this.playerSprite = this.add.image(0, 0, 'player');
-    this.setSpriteHeight(this.playerSprite, PLAYER_RADIUS * 4.2);
-    // Held weapon: pivots at its grip so it extends forward from the hands.
-    this.heldWeapon = this.add.image(0, 0, 'wpn_pistol').setOrigin(0.16, 0.5);
+    // Player bodies/weapons are created per slot on demand in renderState.
+    this.camTarget = this.add.image(map.playerStart.x, map.playerStart.y, 'player').setVisible(false);
     this.inputCollector = new InputCollector(this);
 
     // Darkness overlay: fill a screen-sized render texture pinned to the camera,
@@ -236,21 +276,9 @@ export class GameScene extends Phaser.Scene {
     // Camera: follow the player across the building (lerp + deadzone per the
     // Phaser top-down recipe; roundPixels kills sub-pixel shimmer).
     this.cameras.main.setBounds(0, 0, map.width, map.height);
-    this.cameras.main.startFollow(this.playerSprite, true, 0.1, 0.1);
+    this.cameras.main.startFollow(this.camTarget, true, 0.1, 0.1);
     this.cameras.main.setDeadzone(120, 80);
-
-    // Weapon switching.
-    this.input.keyboard!.on('keydown', (ev: KeyboardEvent) => {
-      const p = this.state.player;
-      if (ev.key >= '1' && ev.key <= '9') {
-        const idx = Number(ev.key) - 1;
-        if (idx < p.owned.length) equipWeapon(p, p.owned[idx]);
-      } else if (ev.key === 'q' || ev.key === 'Q') cycleWeapon(p, -1);
-      else if (ev.key === 'e' || ev.key === 'E') cycleWeapon(p, 1);
-    });
-    this.input.on('wheel', (_p: unknown, _o: unknown, _dx: number, dy: number) => {
-      cycleWeapon(this.state.player, dy > 0 ? 1 : -1);
-    });
+    // Weapon switching is handled inside InputCollector (netcode-safe via PlayerInput).
 
     // HUD.
     this.add.rectangle(16, 16, 200, 14, COLORS.hpBack).setOrigin(0, 0).setScrollFactor(0).setDepth(DEPTH_HUD);
@@ -288,7 +316,7 @@ export class GameScene extends Phaser.Scene {
       .rectangle(480, 270, 960, 540, 0x8a0f14, 0)
       .setScrollFactor(0)
       .setDepth(DEPTH_HUD - 1);
-    this.prevHp = this.state.player.hp;
+    this.prevHp = this.local().hp;
     this.prevWavePhase = this.state.wave.phase;
 
     // Minimap (top-right): fogged — only explored areas show; player dot on top.
@@ -297,16 +325,8 @@ export class GameScene extends Phaser.Scene {
     this.explored.clear(); // fresh fog on (re)start
     this.minimapDirty = true;
 
-    // Looping ambient bed — loaded AFTER create so a slow audio decode never
-    // blocks the game from rendering; plays once decoded + audio is unlocked.
-    const startMusic = () => {
-      if (this.sound.locked || !this.cache.audio.exists('music') || this.sound.get('music')) return;
-      this.sound.play('music', { loop: true, volume: 0.35 });
-    };
-    this.load.audio('music', '/assets/audio/music.wav');
-    this.load.once(Phaser.Loader.Events.COMPLETE, startMusic);
-    this.load.start();
-    this.sound.once(Phaser.Sound.Events.UNLOCKED, startMusic);
+    // All sound (SFX + music) loads in the background now that the scene is up.
+    this.loadAudioDeferred();
 
     // R restarts after death.
     this.input.keyboard!.on('keydown-R', () => {
@@ -314,32 +334,50 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  update(_time: number, deltaMs: number): void {
-    const input = this.inputCollector.sample();
-    this.prevPlayerPos = { x: this.state.player.pos.x, y: this.state.player.pos.y };
-    const bulletsBefore = this.state.nextBulletId;
-
-    const alpha = this.loop.tick(deltaMs / 1000, () => stepSim(this.state, input, SIM_DT));
-
-    if (this.state.nextBulletId > bulletsBefore && WEAPONS[this.state.player.weapon].kind !== 'melee') {
-      this.cameras.main.shake(40, 0.0008);
-      const p = this.state.player;
-      const fx = p.pos.x + Math.cos(p.aimAngle) * 30;
-      const fy = p.pos.y + Math.sin(p.aimAngle) * 30;
-      const flash = this.add.image(fx, fy, 'muzzle').setRotation(p.aimAngle).setAlpha(0.95);
-      this.setSpriteHeight(flash, 34);
-      this.time.delayedCall(45, () => flash.destroy());
-      this.recoil = 5; // px kickback on the player sprite
-      this.lightPulses.push({ x: fx, y: fy, life: 0.09, max: 0.09, size: 130 }); // the shot lights the room
-      this.sfx(GUN_SOUND[p.weapon] ?? 'shot', p.weapon === 'shotgun' || p.weapon === 'rpg' ? 0.55 : 0.42);
-    }
-    this.gameFeelEvents(deltaMs / 1000);
-    this.renderState(alpha, deltaMs / 1000);
+  /** The player this client controls (host/solo = 0, guest = its slot). */
+  private local(): PlayerState {
+    return this.state.players[this.localIndex] ?? this.state.players[0];
   }
 
-  /** Sound + feedback triggers derived from sim-state transitions. */
+  update(_time: number, deltaMs: number): void {
+    const dt = deltaMs / 1000;
+    const input = this.inputCollector.sample();
+    const lp = this.local();
+    this.prevPlayerPos = { x: lp.pos.x, y: lp.pos.y };
+    this.prevLocalFireCd = lp.fireCooldown;
+
+    let alpha = 1;
+    if (this.role === 'guest') {
+      // Guests don't simulate — they send intent and render the host's snapshots.
+      this.guestNet!.sendInput(input);
+      if (this.guestNet!.latest) applySnapshot(this.state, this.guestNet!.latest);
+    } else {
+      if (this.role === 'host') this.hostNet!.inputs[0] = input;
+      const inputs = this.role === 'host' ? this.hostNet!.inputs : [input];
+      alpha = this.loop.tick(dt, () => stepSim(this.state, inputs, SIM_DT));
+      if (this.role === 'host') this.hostNet!.broadcast(snapshot(this.state));
+    }
+
+    // muzzle/recoil/sound off the LOCAL player firing (cooldown jumped up this frame)
+    const now = this.local();
+    if (now.fireCooldown > this.prevLocalFireCd + 0.001 && WEAPONS[now.weapon].kind !== 'melee') {
+      this.cameras.main.shake(40, 0.0008);
+      const fx = now.pos.x + Math.cos(now.aimAngle) * 30;
+      const fy = now.pos.y + Math.sin(now.aimAngle) * 30;
+      const flash = this.add.image(fx, fy, 'muzzle').setRotation(now.aimAngle).setAlpha(0.95);
+      this.setSpriteHeight(flash, 34);
+      this.time.delayedCall(45, () => flash.destroy());
+      this.recoil = 5;
+      this.lightPulses.push({ x: fx, y: fy, life: 0.09, max: 0.09, size: 130 });
+      this.sfx(GUN_SOUND[now.weapon] ?? 'shot', now.weapon === 'shotgun' || now.weapon === 'rpg' ? 0.55 : 0.42);
+    }
+    this.gameFeelEvents(dt);
+    this.renderState(this.role === 'guest' ? 1 : alpha, dt);
+  }
+
+  /** Sound + feedback triggers derived from sim-state transitions (local player). */
   private gameFeelEvents(dt: number): void {
-    const p = this.state.player;
+    const p = this.local();
 
     // took damage → red vignette + shake + grunt
     if (p.hp < this.prevHp - 0.01) {
@@ -504,8 +542,8 @@ export class GameScene extends Phaser.Scene {
     const cols = Math.ceil(this.mapW / cell);
     const rows = Math.ceil(this.mapH / cell);
 
-    // reveal fog cells around the player (~1.5 cell radius)
-    const p = this.state.player;
+    // reveal fog cells around the local player (~1.5 cell radius)
+    const p = this.local();
     const pcx = Math.floor(p.pos.x / cell);
     const pcy = Math.floor(p.pos.y / cell);
     for (let dy = -1; dy <= 1; dy++) {
@@ -552,67 +590,109 @@ export class GameScene extends Phaser.Scene {
   }
 
   private renderState(alpha: number, dt: number): void {
-    const p = this.state.player;
+    const players = this.state.players;
+    const lp = this.local();
     this.recoil = Math.max(0, this.recoil - dt * 60);
-    const kx = -Math.cos(p.aimAngle) * this.recoil; // recoil nudges the sprite back
-    const ky = -Math.sin(p.aimAngle) * this.recoil;
-    const x = lerp(this.prevPlayerPos.x, p.pos.x, alpha);
-    const y = lerp(this.prevPlayerPos.y, p.pos.y, alpha);
-    this.playerSprite.setPosition(x + kx, y + ky).setRotation(p.aimAngle - ART_FACING);
-    if (p.dash.timeLeft > 0) this.playerSprite.setTint(COLORS.dashTint);
-    else this.playerSprite.clearTint();
+    // local player interpolated (host/solo); guests render raw snapshot positions
+    const lx = this.role === 'guest' ? lp.pos.x : lerp(this.prevPlayerPos.x, lp.pos.x, alpha);
+    const ly = this.role === 'guest' ? lp.pos.y : lerp(this.prevPlayerPos.y, lp.pos.y, alpha);
+    this.camTarget.setPosition(lx, ly);
+    const posOf = (i: number, pl: PlayerState) =>
+      i === this.localIndex ? { x: lx, y: ly } : { x: pl.pos.x, y: pl.pos.y };
 
-    // Held weapon in the hands, pointing where the player aims (melee held bigger).
-    const wdef = WEAPONS[p.weapon];
-    const held = wdef.kind === 'melee' ? 26 : 20;
-    const hand = wdef.kind === 'melee' ? 6 : 13;
-    this.heldWeapon
-      .setTexture(`wpn_${p.weapon}`)
-      .setPosition(x + kx + Math.cos(p.aimAngle) * hand, y + ky + Math.sin(p.aimAngle) * hand)
-      .setRotation(p.aimAngle);
-    this.setSpriteHeight(this.heldWeapon, held);
+    // Draw every living player: body, held weapon, downed revive ring.
+    const seenP = new Set<number>();
+    players.forEach((pl, i) => {
+      if (!pl.alive) return;
+      seenP.add(i);
+      const isLocal = i === this.localIndex;
+      const { x: px, y: py } = posOf(i, pl);
+      const kx = isLocal ? -Math.cos(pl.aimAngle) * this.recoil : 0;
+      const ky = isLocal ? -Math.sin(pl.aimAngle) * this.recoil : 0;
 
-    // Dash ghost trail.
-    if (p.dash.timeLeft > 0) {
-      this.dashGhostCd -= dt;
-      if (this.dashGhostCd <= 0) {
-        this.dashGhostCd = 0.028;
-        const ghost = this.add
-          .image(x, y, 'player')
-          .setRotation(this.playerSprite.rotation)
-          .setAlpha(0.35)
-          .setTint(COLORS.dashTint);
-        ghost.setDisplaySize(this.playerSprite.displayWidth, this.playerSprite.displayHeight);
-        this.tweens.add({ targets: ghost, alpha: 0, duration: 180, onComplete: () => ghost.destroy() });
+      let body = this.playerBodies.get(i);
+      if (!body) {
+        body = this.add.image(0, 0, 'player');
+        this.setSpriteHeight(body, PLAYER_RADIUS * 4.2);
+        this.playerBodies.set(i, body);
       }
-    }
+      body.setPosition(px + kx, py + ky).setRotation(pl.aimAngle - ART_FACING);
+      if (pl.downed) body.setTint(0x6a1418);
+      else if (pl.dash.timeLeft > 0) body.setTint(COLORS.dashTint);
+      else if (!isLocal) body.setTint(TEAM_TINT[i % 4]);
+      else body.clearTint();
 
-    // Soft flashlight cone (subtle flicker) + ambient glow + transient light pulses.
-    // The darkness RT is camera-pinned, so all erases happen in screen space.
+      let wpn = this.playerWeapons.get(i);
+      if (!wpn) {
+        wpn = this.add.image(0, 0, 'wpn_pistol').setOrigin(0.16, 0.5);
+        this.playerWeapons.set(i, wpn);
+      }
+      const wdef = WEAPONS[pl.weapon];
+      const hand = wdef.kind === 'melee' ? 6 : 13;
+      wpn
+        .setVisible(!pl.downed)
+        .setTexture(`wpn_${pl.weapon}`)
+        .setPosition(px + kx + Math.cos(pl.aimAngle) * hand, py + ky + Math.sin(pl.aimAngle) * hand)
+        .setRotation(pl.aimAngle);
+      this.setSpriteHeight(wpn, wdef.kind === 'melee' ? 26 : 20);
+
+      // downed → pulsing revive ring showing progress
+      let ring = this.reviveRings.get(i);
+      if (pl.downed) {
+        if (!ring) {
+          ring = this.add.circle(0, 0, 24).setStrokeStyle(3, 0xffd45e, 0.8);
+          this.reviveRings.set(i, ring);
+        }
+        ring.setVisible(true).setPosition(px, py).setStrokeStyle(3, 0xffd45e, 0.4 + 0.5 * pl.reviveProgress);
+        ring.setRadius(20 + 12 * pl.reviveProgress);
+      } else if (ring) {
+        ring.setVisible(false);
+      }
+
+      if (isLocal && pl.dash.timeLeft > 0) {
+        this.dashGhostCd -= dt;
+        if (this.dashGhostCd <= 0) {
+          this.dashGhostCd = 0.028;
+          const ghost = this.add.image(px, py, 'player').setRotation(body.rotation).setAlpha(0.35).setTint(COLORS.dashTint);
+          ghost.setDisplaySize(body.displayWidth, body.displayHeight);
+          this.tweens.add({ targets: ghost, alpha: 0, duration: 180, onComplete: () => ghost.destroy() });
+        }
+      }
+    });
+    for (const [i, s] of this.playerBodies) if (!seenP.has(i)) (s.destroy(), this.playerBodies.delete(i));
+    for (const [i, s] of this.playerWeapons) if (!seenP.has(i)) (s.destroy(), this.playerWeapons.delete(i));
+    for (const [i, s] of this.reviveRings) if (!seenP.has(i)) (s.destroy(), this.reviveRings.delete(i));
+
+    // Darkness: every standing player's flashlight cone + glow cuts it (screen-space).
     const cam = this.cameras.main;
     const ox = cam.scrollX;
     const oy = cam.scrollY;
     const flicker = 1 + Math.sin(this.state.time * 13) * 0.012 + Math.sin(this.state.time * 47) * 0.008;
     const coneLen = FLASHLIGHT_RANGE * 1.12 * flicker;
-    this.coneImg
-      .setPosition(x - ox, y - oy)
-      .setRotation(p.aimAngle)
-      .setDisplaySize(coneLen, 2 * Math.tan(FLASHLIGHT_HALF_ANGLE) * coneLen * 1.35);
-    this.glowImg.setPosition(x - ox, y - oy).setDisplaySize(AMBIENT_RADIUS * 2.9, AMBIENT_RADIUS * 2.9).setAlpha(1);
     this.darkRT.clear();
     this.darkRT.fill(0x05060a, 0.94);
-    this.darkRT.erase(this.coneImg);
-    this.darkRT.erase(this.glowImg);
+    players.forEach((pl, i) => {
+      if (!pl.alive) return;
+      const { x: px, y: py } = posOf(i, pl);
+      this.glowImg.setPosition(px - ox, py - oy).setDisplaySize(AMBIENT_RADIUS * 2.9, AMBIENT_RADIUS * 2.9).setAlpha(1);
+      this.darkRT.erase(this.glowImg);
+      if (!pl.downed) {
+        this.coneImg
+          .setPosition(px - ox, py - oy)
+          .setRotation(pl.aimAngle)
+          .setDisplaySize(coneLen, 2 * Math.tan(FLASHLIGHT_HALF_ANGLE) * coneLen * 1.35);
+        this.darkRT.erase(this.coneImg);
+      }
+    });
     for (const pulse of this.lightPulses) {
       pulse.life -= dt;
       const s = pulse.size * (0.6 + 0.4 * (pulse.life / pulse.max));
-      this.glowImg
-        .setPosition(pulse.x - ox, pulse.y - oy)
-        .setDisplaySize(s, s)
-        .setAlpha(Math.max(0, pulse.life / pulse.max));
+      this.glowImg.setPosition(pulse.x - ox, pulse.y - oy).setDisplaySize(s, s).setAlpha(Math.max(0, pulse.life / pulse.max));
       this.darkRT.erase(this.glowImg);
     }
     this.lightPulses = this.lightPulses.filter((f) => f.life > 0);
+    const x = lx;
+    const y = ly;
 
     this.state.doors.forEach((d, i) => {
       this.doorSprites[i]
@@ -628,11 +708,11 @@ export class GameScene extends Phaser.Scene {
     const onScreen = (ex: number, ey: number): boolean =>
       ex > view.x - 90 && ex < view.right + 90 && ey > view.y - 90 && ey < view.bottom + 90;
 
-    // Melee swing wedge.
-    const def = WEAPONS[p.weapon];
-    if (def.kind === 'melee' && p.meleeSwing > 0) {
+    // Melee swing wedge (local player).
+    const def = WEAPONS[lp.weapon];
+    if (def.kind === 'melee' && lp.meleeSwing > 0) {
       const halfArcDeg = ((def.arc ?? 0) * 180) / Math.PI;
-      const aimDeg = (p.aimAngle * 180) / Math.PI;
+      const aimDeg = (lp.aimAngle * 180) / Math.PI;
       this.meleeArc
         .setPosition(x, y)
         .setRadius(def.range ?? 40)
@@ -709,14 +789,16 @@ export class GameScene extends Phaser.Scene {
       })),
     );
 
-    this.hpFill.width = 200 * Math.max(0, p.hp / PLAYER_MAX_HP);
+    this.hpFill.width = 200 * Math.max(0, lp.hp / PLAYER_MAX_HP);
     const w = this.state.wave;
     const status = w.phase === 'intermission' ? `next in ${Math.ceil(w.timer)}s` : `${this.state.enemies.length} left`;
-    this.hud.setText(`WAVE ${w.index}  ·  ${status}  ·  kills ${w.killsThisWave}`);
+    const squad = this.state.players.filter((q) => q.alive).length;
+    const squadTag = this.role === 'solo' ? '' : `  ·  squad ${squad}`;
+    this.hud.setText(`WAVE ${w.index}  ·  ${status}  ·  kills ${w.killsThisWave}${squadTag}`);
 
-    const ammo = def.startAmmo === undefined ? '∞' : String(Math.ceil(p.ammo[def.id] ?? 0));
-    const slots = p.owned.map((id, i) => `${i + 1}:${WEAPONS[id].name}${id === p.weapon ? '*' : ''}`).join('  ');
-    this.weaponIcon.setTexture(`wpn_${p.weapon}`);
+    const ammo = def.startAmmo === undefined ? '∞' : String(Math.ceil(lp.ammo[def.id] ?? 0));
+    const slots = lp.owned.map((id, i) => `${i + 1}:${WEAPONS[id].name}${id === lp.weapon ? '*' : ''}`).join('  ');
+    this.weaponIcon.setTexture(`wpn_${lp.weapon}`);
     this.setSpriteHeight(this.weaponIcon, 34);
     this.weaponHud.setText(`${def.name}  [${ammo}]     ${slots}`);
 

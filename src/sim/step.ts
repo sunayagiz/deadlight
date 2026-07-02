@@ -8,7 +8,7 @@ import { mapSolids, updateDoors } from './map';
 import { updateMelee } from './melee';
 import { updateDash, updateMovement } from './movement';
 import { updateWaves, type Rng } from './waves';
-import { updateAim, updateBullets, updateFiring } from './weapons';
+import { cycleWeapon, equipWeapon, updateAim, updateBullets, updateFiring } from './weapons';
 import { emptyInput } from './state';
 import { isUp, type GameState, type PlayerInput } from './types';
 
@@ -36,6 +36,9 @@ export function stepSim(
   state.players.forEach((p, i) => {
     if (!isUp(p)) return;
     const input = list[i] ?? emptyInput();
+    // weapon switching flows through input so it's netcode-safe (guests too)
+    if (input.weaponSlot >= 0 && input.weaponSlot < p.owned.length) equipWeapon(p, p.owned[input.weaponSlot]);
+    if (input.weaponCycle !== 0) cycleWeapon(p, input.weaponCycle);
     updateDash(p, input, dt);
     updateMovement(p, input, solids, dt);
     updateAim(p, input);

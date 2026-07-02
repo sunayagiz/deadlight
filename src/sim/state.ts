@@ -62,5 +62,15 @@ export function createGameState(
 }
 
 export function emptyInput(): PlayerInput {
-  return { moveX: 0, moveY: 0, aimWorldX: 0, aimWorldY: 0, fire: false, dash: false, sprint: false };
+  return {
+    moveX: 0,
+    moveY: 0,
+    aimWorldX: 0,
+    aimWorldY: 0,
+    fire: false,
+    dash: false,
+    sprint: false,
+    weaponSlot: -1,
+    weaponCycle: 0,
+  };
 }

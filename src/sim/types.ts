@@ -12,6 +12,8 @@ export interface PlayerInput {
   fire: boolean;
   dash: boolean;
   sprint: boolean;
+  weaponSlot: number; // equip owned[slot] this tick; -1 = no change
+  weaponCycle: number; // cycle owned weapons: -1 prev, +1 next, 0 none
 }
 
 export type WeaponId =
