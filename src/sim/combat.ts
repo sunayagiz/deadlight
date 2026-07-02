@@ -1,5 +1,6 @@
 import { PLAYER_RADIUS } from '../config';
 import { ZOMBIES } from './enemies';
+import { dropLoot } from './loot';
 import { isInvulnerable } from './movement';
 import type { BulletState, GameState, Vec2, Wall } from './types';
 
@@ -44,7 +45,7 @@ function explode(state: GameState, at: Vec2, radius: number, damage: number): vo
  * Order: bullets (hit / wall / expire, with explosions), clear the dead,
  * then living enemies deal contact damage to a non-dashing player.
  */
-export function updateCombat(state: GameState, dt: number): void {
+export function updateCombat(state: GameState, dt: number, rng: () => number = Math.random): void {
   const surviving: BulletState[] = [];
   for (const b of state.bullets) {
     const hit = firstEnemyHit(state, b);
@@ -63,10 +64,17 @@ export function updateCombat(state: GameState, dt: number): void {
   }
   state.bullets = surviving;
 
-  // Clear the dead and tally kills.
-  const before = state.enemies.length;
-  state.enemies = state.enemies.filter((e) => e.hp > 0);
-  state.wave.killsThisWave += before - state.enemies.length;
+  // Clear the dead, tally kills, and let each corpse maybe drop loot.
+  const alive = [];
+  for (const e of state.enemies) {
+    if (e.hp > 0) {
+      alive.push(e);
+    } else {
+      state.wave.killsThisWave += 1;
+      dropLoot(state, e.pos, rng);
+    }
+  }
+  state.enemies = alive;
 
   // Enemy contact damage (DPS) — dash i-frames make the player immune.
   const p = state.player;

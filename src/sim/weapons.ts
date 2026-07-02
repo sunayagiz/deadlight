@@ -42,6 +42,19 @@ export function updateAim(p: PlayerState, input: PlayerInput): void {
   p.aimAngle = Math.atan2(input.aimWorldY - p.pos.y, input.aimWorldX - p.pos.x);
 }
 
+/** Equip an owned weapon by id (no-op if not owned). */
+export function equipWeapon(p: PlayerState, id: WeaponId): void {
+  if (p.owned.includes(id)) p.weapon = id;
+}
+
+/** Step through the owned weapons; dir = +1 next, -1 previous. */
+export function cycleWeapon(p: PlayerState, dir: number): void {
+  const n = p.owned.length;
+  if (n === 0) return;
+  const i = p.owned.indexOf(p.weapon);
+  p.weapon = p.owned[(((i + dir) % n) + n) % n];
+}
+
 export function hasAmmo(p: PlayerState, def: WeaponDef): boolean {
   if (def.startAmmo === undefined) return true;
   return (p.ammo[def.id] ?? 0) > 0;

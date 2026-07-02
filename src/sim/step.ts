@@ -1,5 +1,6 @@
 import { updateCombat } from './combat';
 import { updateEnemies } from './enemies';
+import { updateLoot } from './loot';
 import { updateMelee } from './melee';
 import { updateDash, updateMovement } from './movement';
 import { updateWaves, type Rng } from './waves';
@@ -23,6 +24,7 @@ export function stepSim(
   updateEnemies(state.enemies, state.player, state.walls, dt);
   updateMelee(state, input, dt);
   updateBullets(state, dt);
-  updateCombat(state, dt);
+  updateCombat(state, dt, rng);
+  updateLoot(state, dt);
   updateWaves(state, dt, rng);
 }
