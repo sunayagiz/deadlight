@@ -26,7 +26,7 @@
   },
   "homepage": "https://github.com/sunayagiz/deadlight#readme",
   "dependencies": {
-    "phaser": "^4.2.0"
+    "phaser": "^3.90.0"
   },
   "devDependencies": {
     "typescript": "^6.0.3",
