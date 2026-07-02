@@ -17,9 +17,9 @@ export const ENEMY_SEPARATION_RADIUS = 26; // px: enemies within this push apart
 export const ENEMY_SEPARATION_FORCE = 90; // px/s steering to avoid stacking
 
 // --- Waves ---
-export const WAVE_BUDGET_BASE = 4;
-export const WAVE_BUDGET_GROWTH = 3; // added per wave index
-export const WAVE_SPAWN_INTERVAL = 0.45; // s between spawns within a wave
+export const WAVE_BUDGET_BASE = 12; // bigger map wants a denser horde
+export const WAVE_BUDGET_GROWTH = 6; // added per wave index
+export const WAVE_SPAWN_INTERVAL = 0.28; // s between spawns within a wave
 export const WAVE_INTERMISSION = 6; // s of calm between waves
 export const BRUTE_MIN_WAVE = 3; // brutes only from this wave on
 
