@@ -7,8 +7,8 @@ export interface Vec2 {
 export interface PlayerInput {
   moveX: number; // -1..1
   moveY: number; // -1..1
-  aimX: number; // cursor position in world coords
-  aimY: number;
+  aimWorldX: number; // cursor position in world coords
+  aimWorldY: number;
   fire: boolean;
   dash: boolean;
 }
@@ -48,7 +48,7 @@ export interface Wall {
 
 /** Serializable plain data — this is what will go over the wire in the netcode slice. */
 export interface GameState {
-  time: number;
+  time: number; // seconds
   player: PlayerState;
   bullets: BulletState[];
   nextBulletId: number;

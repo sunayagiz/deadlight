@@ -190,15 +190,19 @@ import { len, norm, lerp } from '../../src/sim/vec';
 
 describe('vec', () => {
   it('len computes euclidean length', () => {
-    expect(len({ x: 3, y: 4 })).toBe(5);
+    expect(len({ x: 3, y: 4 })).toBeCloseTo(5);
   });
 
   it('norm returns zero vector for zero input (no NaN)', () => {
     expect(norm({ x: 0, y: 0 })).toEqual({ x: 0, y: 0 });
   });
 
-  it('norm returns unit-length vector', () => {
-    expect(len(norm({ x: 3, y: 4 }))).toBeCloseTo(1);
+  it('norm pins both direction and magnitude', () => {
+    expect(norm({ x: 3, y: 4 })).toEqual({ x: 0.6, y: 0.8 });
+  });
+
+  it('norm handles negative components', () => {
+    expect(norm({ x: -3, y: 4 })).toEqual({ x: -0.6, y: 0.8 });
   });
 
   it('lerp interpolates between two numbers', () => {
@@ -224,8 +228,8 @@ export interface Vec2 {
 export interface PlayerInput {
   moveX: number; // -1..1
   moveY: number; // -1..1
-  aimX: number; // cursor position in world coords
-  aimY: number;
+  aimWorldX: number; // cursor position in world coords
+  aimWorldY: number;
   fire: boolean;
   dash: boolean;
 }
@@ -331,19 +335,19 @@ export function createGameState(walls: Wall[]): GameState {
     player: createPlayer(480, 270),
     bullets: [],
     nextBulletId: 1,
-    walls,
+    walls: [...walls], // copy: each GameState must be an independent snapshot (netcode)
   };
 }
 
 export function emptyInput(): PlayerInput {
-  return { moveX: 0, moveY: 0, aimX: 0, aimY: 0, fire: false, dash: false };
+  return { moveX: 0, moveY: 0, aimWorldX: 0, aimWorldY: 0, fire: false, dash: false };
 }
 ```
 
 - [ ] **Step 7: Run tests to verify they pass**
 
 Run: `npx vitest run tests/sim/vec.test.ts`
-Expected: 4 passed.
+Expected: 5 passed.
 
 - [ ] **Step 8: Commit and push**
 
@@ -718,13 +722,13 @@ describe('weapons', () => {
   it('aims at the cursor', () => {
     const s = createGameState([]);
     s.player.pos = { x: 100, y: 100 };
-    stepSim(s, { ...emptyInput(), aimX: 100, aimY: 200 }, SIM_DT); // straight down
+    stepSim(s, { ...emptyInput(), aimWorldX: 100, aimWorldY: 200 }, SIM_DT); // straight down
     expect(s.player.aimAngle).toBeCloseTo(Math.PI / 2);
   });
 
   it('fires at the weapon fire rate while trigger is held', () => {
     const s = createGameState([]);
-    const input = { ...emptyInput(), fire: true, aimX: 999, aimY: 0 };
+    const input = { ...emptyInput(), fire: true, aimWorldX: 999, aimWorldY: 0 };
     const ticks = Math.round(1 / SIM_DT); // one second
     for (let i = 0; i < ticks; i++) stepSim(s, input, SIM_DT);
     const expected = WEAPONS.pistol.fireRate;
@@ -736,7 +740,7 @@ describe('weapons', () => {
   it('bullets travel in the aim direction', () => {
     const s = createGameState([]);
     s.player.pos = { x: 100, y: 100 };
-    stepSim(s, { ...emptyInput(), fire: true, aimX: 200, aimY: 100 }, SIM_DT);
+    stepSim(s, { ...emptyInput(), fire: true, aimWorldX: 200, aimWorldY: 100 }, SIM_DT);
     expect(s.bullets).toHaveLength(1);
     expect(s.bullets[0].pos.x).toBeGreaterThan(100);
     expect(s.bullets[0].pos.y).toBeCloseTo(100);
@@ -746,7 +750,7 @@ describe('weapons', () => {
     const wall: Wall = { x: 200, y: 0, w: 32, h: 400 };
     const s = createGameState([wall]);
     s.player.pos = { x: 100, y: 100 };
-    const input = { ...emptyInput(), fire: true, aimX: 300, aimY: 100 };
+    const input = { ...emptyInput(), fire: true, aimWorldX: 300, aimWorldY: 100 };
     for (let i = 0; i < 30; i++) stepSim(s, input, SIM_DT);
     for (const b of s.bullets) {
       expect(b.pos.x).toBeLessThan(200); // none ever inside/past the wall
@@ -755,7 +759,7 @@ describe('weapons', () => {
 
   it('bullets expire after ttl', () => {
     const s = createGameState([]);
-    stepSim(s, { ...emptyInput(), fire: true, aimX: 999, aimY: 0 }, SIM_DT);
+    stepSim(s, { ...emptyInput(), fire: true, aimWorldX: 999, aimWorldY: 0 }, SIM_DT);
     const ticks = Math.ceil(WEAPONS.pistol.bulletTtl / SIM_DT) + 1;
     for (let i = 0; i < ticks; i++) stepSim(s, emptyInput(), SIM_DT);
     expect(s.bullets).toHaveLength(0);
@@ -795,7 +799,7 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
 };
 
 export function updateAim(p: PlayerState, input: PlayerInput): void {
-  p.aimAngle = Math.atan2(input.aimY - p.pos.y, input.aimX - p.pos.x);
+  p.aimAngle = Math.atan2(input.aimWorldY - p.pos.y, input.aimWorldX - p.pos.x);
 }
 
 export function updateFiring(state: GameState, input: PlayerInput, dt: number): void {
@@ -919,8 +923,8 @@ export class InputCollector {
     return {
       moveX: (this.keys.D.isDown ? 1 : 0) - (this.keys.A.isDown ? 1 : 0),
       moveY: (this.keys.S.isDown ? 1 : 0) - (this.keys.W.isDown ? 1 : 0),
-      aimX: world.x,
-      aimY: world.y,
+      aimWorldX: world.x,
+      aimWorldY: world.y,
       fire: pointer.isDown,
       dash: Phaser.Input.Keyboard.JustDown(this.keys.SPACE),
     };
@@ -1128,7 +1132,7 @@ Verified against `docs/specs/slice-1-core-feel.md`:
 - [x] **Spec coverage:** scaffold (T1), sim/render split + serializable state (T2/T6 — state is plain data, sim has no Phaser imports, grep gate in T8), fixed timestep + interpolation (T3, alpha used in T7 render), WASD 220 px/s normalized (T4), wall collision + slide (T4), dash 0.15 s / 640 px/s / i-frames / 0.8 s cooldown (T5), mouse aim + pistol 4/s + bullet TTL/wall death (T6), data-driven WEAPONS table (T6), test room AABBs + dark flat rendering (T7), feel constants centralized in config.ts (T2), playtest checklist (T7/T8).
 - [x] **Non-goals respected:** no zombies, no HP damage path, no sound, no camera follow, single weapon row only.
 - [x] **Placeholder scan:** every code step contains complete code; no TBD/TODO items.
-- [x] **Type consistency:** `PlayerInput` fields (moveX/moveY/aimX/aimY/fire/dash) match across input.ts, tests, and sim; `dash` sub-state shape identical in types.ts/state.ts/movement.ts; `nextBulletId` used consistently in state.ts/weapons.ts/GameScene.ts; `lerp` defined in T2, used in T7.
+- [x] **Type consistency:** `PlayerInput` fields (moveX/moveY/aimWorldX/aimWorldY/fire/dash) match across input.ts, tests, and sim; `dash` sub-state shape identical in types.ts/state.ts/movement.ts; `nextBulletId` used consistently in state.ts/weapons.ts/GameScene.ts; `lerp` defined in T2, used in T7.
 - [x] **Commit hygiene:** every task commits + pushes; `refs #2` on all commits, `closes #2` on the final one; branch `feat/core-feel`.
 
 Known accepted simplifications (deliberate, not gaps): render interpolation uses

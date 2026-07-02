@@ -19,10 +19,10 @@ export function createGameState(walls: Wall[]): GameState {
     player: createPlayer(480, 270),
     bullets: [],
     nextBulletId: 1,
-    walls,
+    walls: [...walls], // copy: each GameState must be an independent snapshot (netcode)
   };
 }
 
 export function emptyInput(): PlayerInput {
-  return { moveX: 0, moveY: 0, aimX: 0, aimY: 0, fire: false, dash: false };
+  return { moveX: 0, moveY: 0, aimWorldX: 0, aimWorldY: 0, fire: false, dash: false };
 }

@@ -9,6 +9,7 @@ export function norm(v: Vec2): Vec2 {
   return l === 0 ? { x: 0, y: 0 } : { x: v.x / l, y: v.y / l };
 }
 
+/** t is intentionally unclamped — callers may extrapolate. */
 export function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }
