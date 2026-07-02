@@ -170,8 +170,19 @@ export class GameScene extends Phaser.Scene {
         .rectangle(r.x + r.w / 2, r.y + r.h / 2, r.w, r.h, r.color, r.alpha)
         .setDepth(DEPTH_FLOOR + 0.1);
     }
+    const edges = this.add.graphics().setDepth(DEPTH_FLOOR + 0.5);
     for (const w of this.state.walls) {
-      this.add.tileSprite(w.x + w.w / 2, w.y + w.h / 2, w.w, w.h, 'wall').setTileScale(0.09375);
+      this.add.tileSprite(w.x + w.w / 2, w.y + w.h / 2, w.w, w.h, 'wall').setTileScale(0.13);
+      // crisp boundary: dark outer stroke + lit inner top/left bevel, so walls
+      // read as solid edges even at the dim edge of the flashlight.
+      edges.lineStyle(3, 0x090a0e, 0.95);
+      edges.strokeRect(w.x, w.y, w.w, w.h);
+      edges.lineStyle(2, 0x878f9f, 0.75);
+      edges.beginPath();
+      edges.moveTo(w.x + 1.5, w.y + w.h - 1.5);
+      edges.lineTo(w.x + 1.5, w.y + 1.5);
+      edges.lineTo(w.x + w.w - 1.5, w.y + 1.5);
+      edges.strokePath();
     }
     this.doorSprites = this.state.doors.map((d) => {
       const img = this.add.image(d.x + d.w / 2, d.y + d.h / 2, 'door_closed');
@@ -562,7 +573,7 @@ export class GameScene extends Phaser.Scene {
         x: e.pos.x,
         y: e.pos.y,
         texture: e.type,
-        height: ZOMBIES[e.type].radius * 4.0,
+        height: ZOMBIES[e.type].radius * 4.7,
         rotation: (e.vel.x || e.vel.y) ? Math.atan2(e.vel.y, e.vel.x) - ART_FACING : 0,
         visible: onScreen(e.pos.x, e.pos.y) && segmentClear(eye, e.pos, solids),
         tintFill: e.boss && e.boss.telegraph > 0 ? COLORS.telegraphTint : e.hitFlash > 0 ? 0xffffff : undefined,
