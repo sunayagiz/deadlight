@@ -25,6 +25,12 @@ export const LOOT_DROP_CHANCE = 0.22; // chance a killed enemy drops something
 export const LOOT_TTL = 15; // s before a dropped item despawns
 export const LOOT_RADIUS = 12; // px pickup range (plus the player radius)
 
+// --- Bosses ---
+export const BOSS_WAVE_INTERVAL = 4; // a boss shows up every Nth wave (4, 8, 12, ...)
+export const BOSS_TELEGRAPH = 0.7; // s of wind-up before an attack lands
+export const BOSS_ATTACK_CD = 2.6; // s between boss attacks
+export const BOSS_SUMMON_COUNT = 3; // adds summoned per screamer summon
+
 // --- Doors & vision ---
 export const DOOR_OPEN_RADIUS = 46; // px: doors swing open when the player gets this close
 export const FLASHLIGHT_RANGE = 340; // px reach of the flashlight cone

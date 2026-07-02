@@ -53,6 +53,7 @@ export interface BulletState {
   damage: number;
   splashRadius: number; // 0 = non-explosive
   splashDamage: number;
+  hostile: boolean; // true = enemy projectile that damages the player
 }
 
 export interface LootState {
@@ -64,7 +65,15 @@ export interface LootState {
   ttl: number; // seconds before it despawns
 }
 
-export type EnemyType = 'shambler' | 'runner' | 'brute';
+export type EnemyType = 'shambler' | 'runner' | 'brute' | 'bloater' | 'screamer';
+
+export type BossAttack = 'spew' | 'spit' | 'summon';
+
+export interface BossBrain {
+  attackCd: number; // seconds until the next attack is chosen
+  telegraph: number; // >0 = winding up (visual warning); attack fires when it hits 0
+  pending: BossAttack | null;
+}
 
 export interface EnemyState {
   id: number;
@@ -73,6 +82,7 @@ export interface EnemyState {
   vel: Vec2;
   hp: number;
   hitFlash: number; // seconds of hit-flash left — pure view hint, still part of sim state
+  boss?: BossBrain; // present only on boss enemies
 }
 
 /** Axis-aligned solid rectangle. */

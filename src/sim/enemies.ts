@@ -9,7 +9,8 @@ export interface EnemyDef {
   speed: number; // px/s
   radius: number;
   contactDamage: number; // damage-per-second while touching a player
-  cost: number; // wave-budget cost
+  cost: number; // wave-budget cost (0 for bosses; they are spawned directly)
+  boss?: boolean;
 }
 
 /** Data-driven enemy table (design spec / slice-2 spec). New enemy = new row, not a new class. */
@@ -17,7 +18,13 @@ export const ZOMBIES: Record<EnemyType, EnemyDef> = {
   shambler: { type: 'shambler', name: 'Shambler', hp: 60, speed: 55, radius: 13, contactDamage: 18, cost: 1 },
   runner: { type: 'runner', name: 'Runner', hp: 30, speed: 130, radius: 10, contactDamage: 12, cost: 2 },
   brute: { type: 'brute', name: 'Brute', hp: 220, speed: 42, radius: 20, contactDamage: 35, cost: 5 },
+  bloater: { type: 'bloater', name: 'Bloater', hp: 900, speed: 40, radius: 30, contactDamage: 40, cost: 0, boss: true },
+  screamer: { type: 'screamer', name: 'Screamer', hp: 650, speed: 72, radius: 26, contactDamage: 25, cost: 0, boss: true },
 };
+
+export function isBoss(type: EnemyType): boolean {
+  return ZOMBIES[type].boss === true;
+}
 
 export function spawnEnemy(state: GameState, type: EnemyType, zone: SpawnZone): EnemyState {
   const def = ZOMBIES[type];
@@ -28,6 +35,7 @@ export function spawnEnemy(state: GameState, type: EnemyType, zone: SpawnZone): 
     vel: { x: 0, y: 0 },
     hp: def.hp,
     hitFlash: 0,
+    ...(def.boss ? { boss: { attackCd: 1.5, telegraph: 0, pending: null } } : {}),
   };
   state.enemies.push(e);
   return e;

@@ -18,6 +18,7 @@ function rpgBullet(x: number, y: number): BulletState {
     damage: def.damage,
     splashRadius: def.splashRadius!,
     splashDamage: def.splashDamage!,
+    hostile: false,
   };
 }
 
