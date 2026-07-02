@@ -1,0 +1,31 @@
+# Env
+.env
+.env.local
+.env.*.local
+
+# Node
+node_modules/
+dist/
+*.local
+
+# Python (tooling scripts, if any)
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# R
+.Rhistory
+.RData
+.Rproj.user/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Large binary/data files
+*.psd
+*.aseprite
+data/raw/
