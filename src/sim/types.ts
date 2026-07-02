@@ -83,6 +83,15 @@ export interface Wall {
   h: number;
 }
 
+/** A door is a wall-shaped AABB that stops being solid (and see-through) once opened. */
+export interface Door {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  open: boolean;
+}
+
 /** Where enemies enter the map. Never spawn on top of the players. */
 export interface SpawnZone {
   x: number;
@@ -113,5 +122,6 @@ export interface GameState {
   wave: WaveState;
   spawnZones: SpawnZone[];
   walls: Wall[];
+  doors: Door[];
   gameOver: boolean;
 }

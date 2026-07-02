@@ -1,5 +1,5 @@
 import { PLAYER_MAX_HP, WAVE_INTERMISSION } from '../config';
-import type { GameState, PlayerInput, PlayerState, SpawnZone, Wall } from './types';
+import type { Door, GameState, PlayerInput, PlayerState, SpawnZone, Wall } from './types';
 
 export function createPlayer(x: number, y: number): PlayerState {
   return {
@@ -17,10 +17,15 @@ export function createPlayer(x: number, y: number): PlayerState {
   };
 }
 
-export function createGameState(walls: Wall[], spawnZones: SpawnZone[] = []): GameState {
+export function createGameState(
+  walls: Wall[],
+  spawnZones: SpawnZone[] = [],
+  doors: Door[] = [],
+  playerStart: { x: number; y: number } = { x: 480, y: 270 },
+): GameState {
   return {
     time: 0,
-    player: createPlayer(480, 270),
+    player: createPlayer(playerStart.x, playerStart.y),
     bullets: [],
     nextBulletId: 1,
     enemies: [],
@@ -37,6 +42,7 @@ export function createGameState(walls: Wall[], spawnZones: SpawnZone[] = []): Ga
     },
     spawnZones: [...spawnZones],
     walls: [...walls], // copy: each GameState must be an independent snapshot (netcode)
+    doors: doors.map((d) => ({ ...d })),
     gameOver: false,
   };
 }

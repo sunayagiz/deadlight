@@ -1,6 +1,7 @@
 import { PLAYER_RADIUS } from '../config';
 import { ZOMBIES } from './enemies';
 import { dropLoot } from './loot';
+import { mapSolids } from './map';
 import { isInvulnerable } from './movement';
 import type { BulletState, GameState, Vec2, Wall } from './types';
 
@@ -46,10 +47,11 @@ function explode(state: GameState, at: Vec2, radius: number, damage: number): vo
  * then living enemies deal contact damage to a non-dashing player.
  */
 export function updateCombat(state: GameState, dt: number, rng: () => number = Math.random): void {
+  const solids = mapSolids(state);
   const surviving: BulletState[] = [];
   for (const b of state.bullets) {
     const hit = firstEnemyHit(state, b);
-    const blocked = insideWall(b.pos, state.walls);
+    const blocked = insideWall(b.pos, solids);
     const expired = b.ttl <= 0;
 
     if (hit) {

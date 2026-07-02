@@ -1,6 +1,7 @@
 import { updateCombat } from './combat';
 import { updateEnemies } from './enemies';
 import { updateLoot } from './loot';
+import { mapSolids, updateDoors } from './map';
 import { updateMelee } from './melee';
 import { updateDash, updateMovement } from './movement';
 import { updateWaves, type Rng } from './waves';
@@ -17,11 +18,14 @@ export function stepSim(
   state.time += dt;
   if (state.gameOver) return; // freeze the world on death; the scene shows the end state
 
+  updateDoors(state.doors, state.player);
+  const solids = mapSolids(state); // walls + still-closed doors
+
   updateDash(state.player, input, dt);
-  updateMovement(state.player, input, state.walls, dt);
+  updateMovement(state.player, input, solids, dt);
   updateAim(state.player, input);
   updateFiring(state, input, dt, rng);
-  updateEnemies(state.enemies, state.player, state.walls, dt);
+  updateEnemies(state.enemies, state.player, solids, dt);
   updateMelee(state, input, dt);
   updateBullets(state, dt);
   updateCombat(state, dt, rng);

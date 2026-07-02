@@ -24,3 +24,9 @@ export const BRUTE_MIN_WAVE = 3; // brutes only from this wave on
 export const LOOT_DROP_CHANCE = 0.22; // chance a killed enemy drops something
 export const LOOT_TTL = 15; // s before a dropped item despawns
 export const LOOT_RADIUS = 12; // px pickup range (plus the player radius)
+
+// --- Doors & vision ---
+export const DOOR_OPEN_RADIUS = 46; // px: doors swing open when the player gets this close
+export const FLASHLIGHT_RANGE = 340; // px reach of the flashlight cone
+export const FLASHLIGHT_HALF_ANGLE = 0.62; // radians: half-width of the cone (~35°)
+export const AMBIENT_RADIUS = 70; // px of dim light around the player regardless of aim
