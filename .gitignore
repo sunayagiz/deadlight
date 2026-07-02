@@ -29,3 +29,4 @@ Thumbs.db
 *.psd
 *.aseprite
 data/raw/
+.task-log/
