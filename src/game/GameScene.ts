@@ -7,7 +7,7 @@ import {
   PLAYER_RADIUS,
   SIM_DT,
 } from '../config';
-import { ZOMBIES } from '../sim/enemies';
+import { ZOMBIES, spawnEnemy } from '../sim/enemies';
 import { buildMap, mapSolids } from '../sim/map';
 import { createGameState } from '../sim/state';
 import { stepSim } from '../sim/step';
@@ -19,56 +19,65 @@ import { InputCollector } from './input';
 import { FixedLoop } from './loop';
 
 const COLORS = {
-  wall: 0x1e1e28,
-  door: 0x6e4a2a,
-  doorOpen: 0x2a2a34,
-  player: 0xcfd2d6,
-  gun: 0x8a8f98,
   bullet: 0xffe08a,
-  rocket: 0xff8a4a,
-  dash: 0x5a6070,
-  flash: 0xfff2c0,
-  boom: 0xffb347,
-  hitFlash: 0xffffff,
-  telegraph: 0xffb0b0, // boss wind-up warning
+  hostileBullet: 0x8aff7a,
+  dashTint: 0x9fb4d8,
+  telegraphTint: 0xff9090,
+  melee: 0xe8eaed,
   hpBack: 0x3a0d0d,
   hpFill: 0xc23b3b,
   bossBarBack: 0x33111a,
   bossBarFill: 0xd23b5a,
-  melee: 0xe8eaed,
-  lootWeapon: 0xf2c14e,
-  lootAmmo: 0x4ec3f2,
 };
 
-const ENEMY_COLORS: Record<EnemyType, number> = {
-  shambler: 0x6b8f5a, // sickly green
-  runner: 0xb0894a, // wiry tan
-  brute: 0x8a3f6b, // bruised purple
-  bloater: 0x4a7d3a, // swollen green
-  screamer: 0xa8324f, // raw red
-};
+/** All character art faces "down" (south, +y) at rotation 0. */
+const ART_FACING = Math.PI / 2;
 
+const DEPTH_FLOOR = -3;
+const DEPTH_BLOOD = -2;
 const DEPTH_DARK = 10;
 const DEPTH_HUD = 20;
+
+const ASSETS = [
+  'player', 'shambler', 'runner', 'brute', 'bloater', 'screamer',
+  'wpn_pistol', 'wpn_smg', 'wpn_shotgun', 'wpn_machinegun', 'wpn_minigun',
+  'wpn_rpg', 'wpn_katana', 'wpn_bat', 'wpn_chainsaw',
+  'crate', 'ammo', 'muzzle', 'explosion', 'rocket', 'blood',
+  'floor', 'wall', 'door_closed', 'door_open',
+] as const;
+
+interface SpriteItem {
+  id: number;
+  x: number;
+  y: number;
+  texture: string;
+  height: number; // display height in px, aspect preserved
+  rotation: number;
+  visible: boolean;
+  tintFill?: number; // solid flash colour (hit/telegraph)
+  tint?: number;
+}
 
 export class GameScene extends Phaser.Scene {
   private state!: GameState;
   private loop = new FixedLoop(SIM_DT);
   private inputCollector!: InputCollector;
-  private playerShape!: Phaser.GameObjects.Arc;
-  private gunShape!: Phaser.GameObjects.Rectangle;
+  private playerSprite!: Phaser.GameObjects.Image;
   private meleeArc!: Phaser.GameObjects.Arc;
-  private doorShapes: Phaser.GameObjects.Rectangle[] = [];
+  private doorSprites: Phaser.GameObjects.Image[] = [];
   private bulletShapes = new Map<number, Phaser.GameObjects.Arc>();
-  private enemyShapes = new Map<number, Phaser.GameObjects.Arc>();
-  private lootShapes = new Map<number, Phaser.GameObjects.Arc>();
+  private rocketSprites = new Map<number, Phaser.GameObjects.Image>();
+  private enemySprites = new Map<number, Phaser.GameObjects.Image>();
+  private lootSprites = new Map<number, Phaser.GameObjects.Image>();
+  private bloodDecals: Phaser.GameObjects.Image[] = [];
   private explosiveBullets = new Map<number, { x: number; y: number }>();
   private prevPlayerPos = { x: 0, y: 0 };
-  private darkness!: Phaser.GameObjects.Rectangle;
-  private lightG!: Phaser.GameObjects.Graphics; // mask source, never added to the display list
+  private darkRT!: Phaser.GameObjects.RenderTexture;
+  private lightG!: Phaser.GameObjects.Graphics;
   private hpFill!: Phaser.GameObjects.Rectangle;
   private hud!: Phaser.GameObjects.Text;
   private weaponHud!: Phaser.GameObjects.Text;
+  private weaponIcon!: Phaser.GameObjects.Image;
   private bossBarBack!: Phaser.GameObjects.Rectangle;
   private bossBarFill!: Phaser.GameObjects.Rectangle;
   private bossLabel!: Phaser.GameObjects.Text;
@@ -78,30 +87,49 @@ export class GameScene extends Phaser.Scene {
     super('game');
   }
 
+  preload(): void {
+    for (const key of ASSETS) this.load.image(key, `/assets/${key}.png`);
+  }
+
   create(): void {
     const map = buildMap();
     this.state = createGameState(map.walls, map.spawnZones, map.doors, map.playerStart);
 
-    for (const w of this.state.walls) {
-      this.add.rectangle(w.x + w.w / 2, w.y + w.h / 2, w.w, w.h, COLORS.wall);
+    // Debug/playtest: ?wave=N jumps straight to wave N with a short countdown;
+    // ?zoo=1 lines up one of every enemy type for sprite inspection.
+    const qs = new URLSearchParams(window.location.search);
+    const debugWave = Number(qs.get('wave'));
+    if (debugWave > 0) {
+      this.state.wave.index = debugWave;
+      this.state.wave.timer = 0.8;
     }
-    this.doorShapes = this.state.doors.map((d) =>
-      this.add.rectangle(d.x + d.w / 2, d.y + d.h / 2, d.w, d.h, COLORS.door),
-    );
+    if (qs.get('zoo')) {
+      const types = ['shambler', 'runner', 'brute', 'bloater', 'screamer'] as const;
+      types.forEach((t, i) => spawnEnemy(this.state, t, { x: 180 + i * 70, y: 160 }));
+      this.state.wave.timer = 9999; // hold the wave so the lineup stays put
+    }
+
+    // Floor + walls from tiling textures; doors as switchable sprites.
+    this.add.tileSprite(480, 270, 960, 540, 'floor').setTileScale(0.25).setDepth(DEPTH_FLOOR);
+    for (const w of this.state.walls) {
+      this.add.tileSprite(w.x + w.w / 2, w.y + w.h / 2, w.w, w.h, 'wall').setTileScale(0.09375);
+    }
+    this.doorSprites = this.state.doors.map((d) => {
+      const img = this.add.image(d.x + d.w / 2, d.y + d.h / 2, 'door_closed');
+      img.setDisplaySize(d.w, d.h);
+      return img;
+    });
 
     this.meleeArc = this.add.circle(0, 0, 60, COLORS.melee, 0.25).setVisible(false);
-    this.playerShape = this.add.circle(0, 0, PLAYER_RADIUS, COLORS.player);
-    this.gunShape = this.add.rectangle(0, 0, 22, 6, COLORS.gun).setOrigin(0, 0.5);
+    this.playerSprite = this.add.image(0, 0, 'player');
+    this.setSpriteHeight(this.playerSprite, PLAYER_RADIUS * 3.6);
     this.inputCollector = new InputCollector(this);
 
-    // Darkness overlay revealed only inside the flashlight cone (inverted geometry mask).
+    // Darkness overlay: fill a render texture, erase the flashlight cone out of it.
+    // (RenderTexture.erase works identically on WebGL and Canvas; geometry-mask
+    // invertAlpha silently fails on the Canvas renderer.)
     this.lightG = this.make.graphics({}, false);
-    const mask = this.lightG.createGeometryMask();
-    mask.invertAlpha = true;
-    this.darkness = this.add
-      .rectangle(480, 270, 960, 540, 0x05060a, 0.94)
-      .setDepth(DEPTH_DARK);
-    this.darkness.setMask(mask);
+    this.darkRT = this.add.renderTexture(0, 0, 960, 540).setOrigin(0, 0).setDepth(DEPTH_DARK);
 
     // Weapon switching.
     this.input.keyboard!.on('keydown', (ev: KeyboardEvent) => {
@@ -116,24 +144,24 @@ export class GameScene extends Phaser.Scene {
       cycleWeapon(this.state.player, dy > 0 ? 1 : -1);
     });
 
-    // HUD (above the darkness).
+    // HUD.
     this.add.rectangle(16, 16, 200, 14, COLORS.hpBack).setOrigin(0, 0).setScrollFactor(0).setDepth(DEPTH_HUD);
     this.hpFill = this.add.rectangle(16, 16, 200, 14, COLORS.hpFill).setOrigin(0, 0).setScrollFactor(0).setDepth(DEPTH_HUD);
     this.hud = this.add
       .text(16, 36, '', { fontFamily: 'monospace', fontSize: '14px', color: '#cfd2d6' })
       .setScrollFactor(0)
       .setDepth(DEPTH_HUD);
+    this.weaponIcon = this.add
+      .image(34, 500, 'wpn_pistol')
+      .setScrollFactor(0)
+      .setDepth(DEPTH_HUD);
+    this.setSpriteHeight(this.weaponIcon, 34);
     this.weaponHud = this.add
-      .text(16, 512, '', { fontFamily: 'monospace', fontSize: '14px', color: '#f2c14e' })
+      .text(58, 492, '', { fontFamily: 'monospace', fontSize: '14px', color: '#f2c14e' })
       .setScrollFactor(0)
       .setDepth(DEPTH_HUD);
 
-    // Boss health bar (shown only while a boss is alive).
-    this.bossBarBack = this.add
-      .rectangle(480, 26, 380, 12, COLORS.bossBarBack)
-      .setScrollFactor(0)
-      .setDepth(DEPTH_HUD)
-      .setVisible(false);
+    this.bossBarBack = this.add.rectangle(480, 26, 380, 12, COLORS.bossBarBack).setScrollFactor(0).setDepth(DEPTH_HUD).setVisible(false);
     this.bossBarFill = this.add
       .rectangle(480 - 190, 26, 380, 12, COLORS.bossBarFill)
       .setOrigin(0, 0.5)
@@ -158,10 +186,11 @@ export class GameScene extends Phaser.Scene {
     if (this.state.nextBulletId > bulletsBefore && WEAPONS[this.state.player.weapon].kind !== 'melee') {
       this.cameras.main.shake(40, 0.0008);
       const p = this.state.player;
-      const fx = p.pos.x + Math.cos(p.aimAngle) * 26;
-      const fy = p.pos.y + Math.sin(p.aimAngle) * 26;
-      const flash = this.add.circle(fx, fy, 7, COLORS.flash, 0.9);
-      this.time.delayedCall(40, () => flash.destroy());
+      const fx = p.pos.x + Math.cos(p.aimAngle) * 28;
+      const fy = p.pos.y + Math.sin(p.aimAngle) * 28;
+      const flash = this.add.image(fx, fy, 'muzzle').setRotation(p.aimAngle);
+      this.setSpriteHeight(flash, 30);
+      this.time.delayedCall(45, () => flash.destroy());
     }
     this.renderState(alpha);
   }
@@ -170,21 +199,26 @@ export class GameScene extends Phaser.Scene {
     const p = this.state.player;
     const x = lerp(this.prevPlayerPos.x, p.pos.x, alpha);
     const y = lerp(this.prevPlayerPos.y, p.pos.y, alpha);
-    this.playerShape.setPosition(x, y);
-    this.playerShape.setFillStyle(p.dash.timeLeft > 0 ? COLORS.dash : COLORS.player);
-    this.gunShape.setPosition(x, y).setRotation(p.aimAngle);
+    this.playerSprite.setPosition(x, y).setRotation(p.aimAngle - ART_FACING);
+    if (p.dash.timeLeft > 0) this.playerSprite.setTint(COLORS.dashTint);
+    else this.playerSprite.clearTint();
 
-    // Flashlight cone + ambient glow, redrawn into the mask source.
+    // Flashlight cone + ambient glow: repaint the darkness, erase the lit shapes.
     this.lightG.clear();
     this.lightG.fillStyle(0xffffff, 1);
     this.lightG.beginPath();
     this.lightG.slice(x, y, FLASHLIGHT_RANGE, p.aimAngle - FLASHLIGHT_HALF_ANGLE, p.aimAngle + FLASHLIGHT_HALF_ANGLE, false);
     this.lightG.fillPath();
     this.lightG.fillCircle(x, y, AMBIENT_RADIUS);
+    this.darkRT.clear();
+    this.darkRT.fill(0x05060a, 0.94);
+    this.darkRT.erase(this.lightG);
 
-    // Doors: closed = solid, open = faint frame.
     this.state.doors.forEach((d, i) => {
-      this.doorShapes[i].setFillStyle(d.open ? COLORS.doorOpen : COLORS.door).setAlpha(d.open ? 0.4 : 1);
+      this.doorSprites[i]
+        .setTexture(d.open ? 'door_open' : 'door_closed')
+        .setDisplaySize(d.w, d.h)
+        .setAlpha(d.open ? 0.45 : 1);
     });
 
     const solids = mapSolids(this.state);
@@ -207,42 +241,54 @@ export class GameScene extends Phaser.Scene {
 
     this.trackExplosions();
 
-    this.syncShapes(
+    // Plain bullets as glowing dots (player amber, hostile sickly green); rockets as sprites.
+    this.syncCircles(
       this.bulletShapes,
-      this.state.bullets.map((b) => ({
-        id: b.id,
-        x: b.pos.x,
-        y: b.pos.y,
-        r: b.splashRadius > 0 ? 5 : 3,
-        color: b.splashRadius > 0 ? COLORS.rocket : COLORS.bullet,
-        visible: true,
-      })),
+      this.state.bullets
+        .filter((b) => b.splashRadius === 0)
+        .map((b) => ({ id: b.id, x: b.pos.x, y: b.pos.y, r: b.hostile ? 4 : 3, color: b.hostile ? COLORS.hostileBullet : COLORS.bullet })),
     );
-    // Enemies/loot are hidden unless the player has line of sight to them.
-    this.syncShapes(
-      this.enemyShapes,
+    this.syncSprites(
+      this.rocketSprites,
+      this.state.bullets
+        .filter((b) => b.splashRadius > 0)
+        .map((b) => ({
+          id: b.id,
+          x: b.pos.x,
+          y: b.pos.y,
+          texture: 'rocket',
+          height: 26,
+          rotation: Math.atan2(b.vel.y, b.vel.x) - ART_FACING,
+          visible: true,
+        })),
+    );
+
+    // Enemies: sprite per type, facing their motion, hidden without line of sight.
+    this.syncSprites(
+      this.enemySprites,
       this.state.enemies.map((e) => ({
         id: e.id,
         x: e.pos.x,
         y: e.pos.y,
-        r: ZOMBIES[e.type].radius,
-        color:
-          e.boss && e.boss.telegraph > 0
-            ? COLORS.telegraph
-            : e.hitFlash > 0
-              ? COLORS.hitFlash
-              : ENEMY_COLORS[e.type],
+        texture: e.type,
+        height: ZOMBIES[e.type].radius * 3.4,
+        rotation: (e.vel.x || e.vel.y) ? Math.atan2(e.vel.y, e.vel.x) - ART_FACING : 0,
         visible: segmentClear(eye, e.pos, solids),
+        tintFill: e.boss && e.boss.telegraph > 0 ? COLORS.telegraphTint : e.hitFlash > 0 ? 0xffffff : undefined,
       })),
+      (lastX, lastY, id) => this.spawnBlood(lastX, lastY, id),
     );
-    this.syncShapes(
-      this.lootShapes,
+
+    // Loot: weapon drops show the actual weapon, ammo shows the ammo box.
+    this.syncSprites(
+      this.lootSprites,
       this.state.loot.map((l) => ({
         id: l.id,
         x: l.pos.x,
         y: l.pos.y,
-        r: 6,
-        color: l.kind === 'weapon' ? COLORS.lootWeapon : COLORS.lootAmmo,
+        texture: l.kind === 'weapon' ? `wpn_${l.weapon}` : 'ammo',
+        height: 26,
+        rotation: 0,
         visible: segmentClear(eye, l.pos, solids),
       })),
     );
@@ -254,6 +300,8 @@ export class GameScene extends Phaser.Scene {
 
     const ammo = def.startAmmo === undefined ? '∞' : String(Math.ceil(p.ammo[def.id] ?? 0));
     const slots = p.owned.map((id, i) => `${i + 1}:${WEAPONS[id].name}${id === p.weapon ? '*' : ''}`).join('  ');
+    this.weaponIcon.setTexture(`wpn_${p.weapon}`);
+    this.setSpriteHeight(this.weaponIcon, 34);
     this.weaponHud.setText(`${def.name}  [${ammo}]     ${slots}`);
 
     const boss = this.state.enemies.find((e) => e.boss);
@@ -279,6 +327,23 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  /** Scale an image to a display height, preserving the source aspect ratio. */
+  private setSpriteHeight(img: Phaser.GameObjects.Image, height: number): void {
+    const src = img.texture.getSourceImage();
+    img.setDisplaySize((src.width / src.height) * height, height);
+  }
+
+  private spawnBlood(x: number, y: number, id: number): void {
+    const blood = this.add
+      .image(x, y, 'blood')
+      .setDepth(DEPTH_BLOOD)
+      .setAlpha(0.75)
+      .setRotation(((id * 137) % 360) * (Math.PI / 180));
+    this.setSpriteHeight(blood, 34 + ((id * 53) % 28));
+    this.bloodDecals.push(blood);
+    if (this.bloodDecals.length > 80) this.bloodDecals.shift()!.destroy();
+  }
+
   private trackExplosions(): void {
     const present = new Set<number>();
     for (const b of this.state.bullets) {
@@ -289,18 +354,19 @@ export class GameScene extends Phaser.Scene {
     }
     for (const [id, pos] of this.explosiveBullets) {
       if (!present.has(id)) {
-        const boom = this.add.circle(pos.x, pos.y, 90, COLORS.boom, 0.5);
-        this.tweens.add({ targets: boom, alpha: 0, scale: 1.2, duration: 220, onComplete: () => boom.destroy() });
+        const boom = this.add.image(pos.x, pos.y, 'explosion').setAlpha(0.95);
+        this.setSpriteHeight(boom, 110);
+        this.tweens.add({ targets: boom, alpha: 0, scale: boom.scale * 1.6, duration: 260, onComplete: () => boom.destroy() });
         this.cameras.main.shake(120, 0.006);
         this.explosiveBullets.delete(id);
       }
     }
   }
 
-  /** Diffing renderer: create/move/destroy view shapes to match sim entities by id. */
-  private syncShapes(
+  /** Diffing renderer for circles (bullet tracers). */
+  private syncCircles(
     pool: Map<number, Phaser.GameObjects.Arc>,
-    items: { id: number; x: number; y: number; r: number; color: number; visible: boolean }[],
+    items: { id: number; x: number; y: number; r: number; color: number }[],
   ): void {
     const seen = new Set<number>();
     for (const it of items) {
@@ -310,11 +376,40 @@ export class GameScene extends Phaser.Scene {
         shape = this.add.circle(it.x, it.y, it.r, it.color);
         pool.set(it.id, shape);
       }
-      shape.setPosition(it.x, it.y).setRadius(it.r).setFillStyle(it.color).setVisible(it.visible);
+      shape.setPosition(it.x, it.y).setFillStyle(it.color);
     }
     for (const [id, shape] of pool) {
       if (!seen.has(id)) {
         shape.destroy();
+        pool.delete(id);
+      }
+    }
+  }
+
+  /** Diffing renderer for textured sprites; onRemove fires at the entity's last position (blood etc.). */
+  private syncSprites(
+    pool: Map<number, Phaser.GameObjects.Image>,
+    items: SpriteItem[],
+    onRemove?: (lastX: number, lastY: number, id: number) => void,
+  ): void {
+    const seen = new Set<number>();
+    for (const it of items) {
+      seen.add(it.id);
+      let img = pool.get(it.id);
+      if (!img) {
+        img = this.add.image(it.x, it.y, it.texture);
+        this.setSpriteHeight(img, it.height);
+        pool.set(it.id, img);
+      }
+      img.setPosition(it.x, it.y).setRotation(it.rotation).setVisible(it.visible);
+      if (it.tintFill !== undefined) img.setTintFill(it.tintFill);
+      else if (it.tint !== undefined) img.setTint(it.tint);
+      else img.clearTint();
+    }
+    for (const [id, img] of pool) {
+      if (!seen.has(id)) {
+        onRemove?.(img.x, img.y, id);
+        img.destroy();
         pool.delete(id);
       }
     }
