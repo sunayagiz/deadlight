@@ -44,6 +44,7 @@ const ASSETS = [
   'wpn_rpg', 'wpn_katana', 'wpn_bat', 'wpn_chainsaw',
   'crate', 'ammo', 'muzzle', 'explosion', 'rocket', 'blood',
   'floor', 'wall', 'door_closed', 'door_open',
+  'light_glow', 'light_cone',
 ] as const;
 
 interface SpriteItem {
@@ -56,6 +57,7 @@ interface SpriteItem {
   visible: boolean;
   tintFill?: number; // solid flash colour (hit/telegraph)
   tint?: number;
+  wobble?: number; // walk-sway amplitude in radians (0/undefined = none)
 }
 
 export class GameScene extends Phaser.Scene {
@@ -73,7 +75,11 @@ export class GameScene extends Phaser.Scene {
   private explosiveBullets = new Map<number, { x: number; y: number }>();
   private prevPlayerPos = { x: 0, y: 0 };
   private darkRT!: Phaser.GameObjects.RenderTexture;
-  private lightG!: Phaser.GameObjects.Graphics;
+  private coneImg!: Phaser.GameObjects.Image; // erase sources, never displayed
+  private glowImg!: Phaser.GameObjects.Image;
+  private lightPulses: { x: number; y: number; life: number; max: number; size: number }[] = [];
+  private recoil = 0;
+  private dashGhostCd = 0;
   private hpFill!: Phaser.GameObjects.Rectangle;
   private hud!: Phaser.GameObjects.Text;
   private weaponHud!: Phaser.GameObjects.Text;
@@ -122,14 +128,15 @@ export class GameScene extends Phaser.Scene {
 
     this.meleeArc = this.add.circle(0, 0, 60, COLORS.melee, 0.25).setVisible(false);
     this.playerSprite = this.add.image(0, 0, 'player');
-    this.setSpriteHeight(this.playerSprite, PLAYER_RADIUS * 3.6);
+    this.setSpriteHeight(this.playerSprite, PLAYER_RADIUS * 4.2);
     this.inputCollector = new InputCollector(this);
 
-    // Darkness overlay: fill a render texture, erase the flashlight cone out of it.
+    // Darkness overlay: fill a render texture, erase soft light textures out of it.
     // (RenderTexture.erase works identically on WebGL and Canvas; geometry-mask
     // invertAlpha silently fails on the Canvas renderer.)
-    this.lightG = this.make.graphics({}, false);
     this.darkRT = this.add.renderTexture(0, 0, 960, 540).setOrigin(0, 0).setDepth(DEPTH_DARK);
+    this.coneImg = this.make.image({ key: 'light_cone', add: false }).setOrigin(0.028, 0.5);
+    this.glowImg = this.make.image({ key: 'light_glow', add: false });
 
     // Weapon switching.
     this.input.keyboard!.on('keydown', (ev: KeyboardEvent) => {
@@ -186,33 +193,62 @@ export class GameScene extends Phaser.Scene {
     if (this.state.nextBulletId > bulletsBefore && WEAPONS[this.state.player.weapon].kind !== 'melee') {
       this.cameras.main.shake(40, 0.0008);
       const p = this.state.player;
-      const fx = p.pos.x + Math.cos(p.aimAngle) * 28;
-      const fy = p.pos.y + Math.sin(p.aimAngle) * 28;
-      const flash = this.add.image(fx, fy, 'muzzle').setRotation(p.aimAngle);
-      this.setSpriteHeight(flash, 30);
+      const fx = p.pos.x + Math.cos(p.aimAngle) * 30;
+      const fy = p.pos.y + Math.sin(p.aimAngle) * 30;
+      const flash = this.add.image(fx, fy, 'muzzle').setRotation(p.aimAngle).setAlpha(0.95);
+      this.setSpriteHeight(flash, 34);
       this.time.delayedCall(45, () => flash.destroy());
+      this.recoil = 5; // px kickback on the player sprite
+      this.lightPulses.push({ x: fx, y: fy, life: 0.09, max: 0.09, size: 130 }); // the shot lights the room
     }
-    this.renderState(alpha);
+    this.renderState(alpha, deltaMs / 1000);
   }
 
-  private renderState(alpha: number): void {
+  private renderState(alpha: number, dt: number): void {
     const p = this.state.player;
+    this.recoil = Math.max(0, this.recoil - dt * 60);
+    const kx = -Math.cos(p.aimAngle) * this.recoil; // recoil nudges the sprite back
+    const ky = -Math.sin(p.aimAngle) * this.recoil;
     const x = lerp(this.prevPlayerPos.x, p.pos.x, alpha);
     const y = lerp(this.prevPlayerPos.y, p.pos.y, alpha);
-    this.playerSprite.setPosition(x, y).setRotation(p.aimAngle - ART_FACING);
+    this.playerSprite.setPosition(x + kx, y + ky).setRotation(p.aimAngle - ART_FACING);
     if (p.dash.timeLeft > 0) this.playerSprite.setTint(COLORS.dashTint);
     else this.playerSprite.clearTint();
 
-    // Flashlight cone + ambient glow: repaint the darkness, erase the lit shapes.
-    this.lightG.clear();
-    this.lightG.fillStyle(0xffffff, 1);
-    this.lightG.beginPath();
-    this.lightG.slice(x, y, FLASHLIGHT_RANGE, p.aimAngle - FLASHLIGHT_HALF_ANGLE, p.aimAngle + FLASHLIGHT_HALF_ANGLE, false);
-    this.lightG.fillPath();
-    this.lightG.fillCircle(x, y, AMBIENT_RADIUS);
+    // Dash ghost trail.
+    if (p.dash.timeLeft > 0) {
+      this.dashGhostCd -= dt;
+      if (this.dashGhostCd <= 0) {
+        this.dashGhostCd = 0.028;
+        const ghost = this.add
+          .image(x, y, 'player')
+          .setRotation(this.playerSprite.rotation)
+          .setAlpha(0.35)
+          .setTint(COLORS.dashTint);
+        ghost.setDisplaySize(this.playerSprite.displayWidth, this.playerSprite.displayHeight);
+        this.tweens.add({ targets: ghost, alpha: 0, duration: 180, onComplete: () => ghost.destroy() });
+      }
+    }
+
+    // Soft flashlight cone (subtle flicker) + ambient glow + transient light pulses.
+    const flicker = 1 + Math.sin(this.state.time * 13) * 0.012 + Math.sin(this.state.time * 47) * 0.008;
+    const coneLen = FLASHLIGHT_RANGE * 1.12 * flicker;
+    this.coneImg
+      .setPosition(x, y)
+      .setRotation(p.aimAngle)
+      .setDisplaySize(coneLen, 2 * Math.tan(FLASHLIGHT_HALF_ANGLE) * coneLen * 1.35);
+    this.glowImg.setPosition(x, y).setDisplaySize(AMBIENT_RADIUS * 2.9, AMBIENT_RADIUS * 2.9).setAlpha(1);
     this.darkRT.clear();
     this.darkRT.fill(0x05060a, 0.94);
-    this.darkRT.erase(this.lightG);
+    this.darkRT.erase(this.coneImg);
+    this.darkRT.erase(this.glowImg);
+    for (const pulse of this.lightPulses) {
+      pulse.life -= dt;
+      const s = pulse.size * (0.6 + 0.4 * (pulse.life / pulse.max));
+      this.glowImg.setPosition(pulse.x, pulse.y).setDisplaySize(s, s).setAlpha(Math.max(0, pulse.life / pulse.max));
+      this.darkRT.erase(this.glowImg);
+    }
+    this.lightPulses = this.lightPulses.filter((f) => f.life > 0);
 
     this.state.doors.forEach((d, i) => {
       this.doorSprites[i]
@@ -263,7 +299,7 @@ export class GameScene extends Phaser.Scene {
         })),
     );
 
-    // Enemies: sprite per type, facing their motion, hidden without line of sight.
+    // Enemies: sprite per type, facing their motion with a walk sway, hidden without line of sight.
     this.syncSprites(
       this.enemySprites,
       this.state.enemies.map((e) => ({
@@ -271,10 +307,11 @@ export class GameScene extends Phaser.Scene {
         x: e.pos.x,
         y: e.pos.y,
         texture: e.type,
-        height: ZOMBIES[e.type].radius * 3.4,
+        height: ZOMBIES[e.type].radius * 4.0,
         rotation: (e.vel.x || e.vel.y) ? Math.atan2(e.vel.y, e.vel.x) - ART_FACING : 0,
         visible: segmentClear(eye, e.pos, solids),
         tintFill: e.boss && e.boss.telegraph > 0 ? COLORS.telegraphTint : e.hitFlash > 0 ? 0xffffff : undefined,
+        wobble: e.boss ? 0.05 : 0.11, // shamble sway; heavier bodies sway less
       })),
       (lastX, lastY, id) => this.spawnBlood(lastX, lastY, id),
     );
@@ -355,9 +392,10 @@ export class GameScene extends Phaser.Scene {
     for (const [id, pos] of this.explosiveBullets) {
       if (!present.has(id)) {
         const boom = this.add.image(pos.x, pos.y, 'explosion').setAlpha(0.95);
-        this.setSpriteHeight(boom, 110);
-        this.tweens.add({ targets: boom, alpha: 0, scale: boom.scale * 1.6, duration: 260, onComplete: () => boom.destroy() });
+        this.setSpriteHeight(boom, 120);
+        this.tweens.add({ targets: boom, alpha: 0, scale: boom.scale * 1.7, duration: 300, onComplete: () => boom.destroy() });
         this.cameras.main.shake(120, 0.006);
+        this.lightPulses.push({ x: pos.x, y: pos.y, life: 0.28, max: 0.28, size: 340 }); // blast floods the room with light
         this.explosiveBullets.delete(id);
       }
     }
@@ -393,15 +431,24 @@ export class GameScene extends Phaser.Scene {
     onRemove?: (lastX: number, lastY: number, id: number) => void,
   ): void {
     const seen = new Set<number>();
+    const t = this.state.time;
     for (const it of items) {
       seen.add(it.id);
       let img = pool.get(it.id);
       if (!img) {
         img = this.add.image(it.x, it.y, it.texture);
         this.setSpriteHeight(img, it.height);
+        img.setAlpha(0.1); // rise out of the dark (frame-based, no tween dependency)
         pool.set(it.id, img);
+      } else if (img.alpha < 1) {
+        img.setAlpha(Math.min(1, img.alpha + 0.07));
       }
-      img.setPosition(it.x, it.y).setRotation(it.rotation).setVisible(it.visible);
+      if (img.texture.key !== it.texture) {
+        img.setTexture(it.texture);
+        this.setSpriteHeight(img, it.height);
+      }
+      const sway = it.wobble ? Math.sin(t * 6 + it.id * 2.13) * it.wobble : 0;
+      img.setPosition(it.x, it.y).setRotation(it.rotation + sway).setVisible(it.visible);
       if (it.tintFill !== undefined) img.setTintFill(it.tintFill);
       else if (it.tint !== undefined) img.setTint(it.tint);
       else img.clearTint();
