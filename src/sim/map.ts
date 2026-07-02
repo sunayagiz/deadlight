@@ -10,215 +10,219 @@ export interface MapDef {
   playerStart: { x: number; y: number };
 }
 
-const T = 24; // wall thickness
+// ── Carving engine ───────────────────────────────────────────────────────────
+// The map starts as SOLID ROCK and rooms/corridors are carved out of it — the
+// opposite of stacking boxes. Diagonal corridors, octagonal rooms, winding
+// tunnels and cave blobs all fall out of three carve primitives. The leftover
+// solid cells are compressed into wall rects via greedy rect decomposition.
 
-/** Horizontal wall from x0..x1 at y, with [startX, width] gaps left open. */
-function hwall(walls: Wall[], y: number, x0: number, x1: number, gaps: [number, number][] = []): void {
-  let cur = x0;
-  for (const [gx, gw] of [...gaps].sort((a, b) => a[0] - b[0])) {
-    if (gx > cur) walls.push({ x: cur, y, w: gx - cur, h: T });
-    cur = gx + gw;
+const CELL = 60; // px per grid cell
+const COLS = 144; // 8640 px
+const ROWS = 64; // 3840 px
+
+class Carver {
+  grid = new Uint8Array(COLS * ROWS).fill(1); // 1 = solid rock
+
+  private set(cx: number, cy: number, v: number): void {
+    if (cx >= 0 && cy >= 0 && cx < COLS && cy < ROWS) this.grid[cy * COLS + cx] = v;
   }
-  if (cur < x1) walls.push({ x: cur, y, w: x1 - cur, h: T });
+
+  /** Open a rectangular chamber (cell coords, inclusive..exclusive). */
+  rect(cx0: number, cy0: number, cx1: number, cy1: number): void {
+    for (let y = cy0; y < cy1; y++) for (let x = cx0; x < cx1; x++) this.set(x, y, 0);
+  }
+
+  /** Open a disc — junction bulges, dens, cave pockets. */
+  disc(cx: number, cy: number, r: number): void {
+    for (let y = Math.floor(cy - r); y <= cy + r; y++) {
+      for (let x = Math.floor(cx - r); x <= cx + r; x++) {
+        if ((x - cx) ** 2 + (y - cy) ** 2 <= r * r) this.set(x, y, 0);
+      }
+    }
+  }
+
+  /** Carve a corridor of half-width hw between two cells — any angle. */
+  line(x0: number, y0: number, x1: number, y1: number, hw: number): void {
+    const steps = Math.ceil(Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0))) * 2;
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      this.disc(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, hw);
+    }
+  }
+
+  /** Chamfer: re-fill a triangular corner of a carved rect (45° stair-step). */
+  fillCorner(cx: number, cy: number, size: number, dirX: 1 | -1, dirY: 1 | -1): void {
+    for (let i = 0; i < size; i++) {
+      for (let j = 0; j < size - i; j++) this.set(cx + i * dirX, cy + j * dirY, 1);
+    }
+  }
+
+  /** Octagonal room: rect with all four corners chamfered. */
+  octagon(cx0: number, cy0: number, cx1: number, cy1: number, chamfer: number): void {
+    this.rect(cx0, cy0, cx1, cy1);
+    this.fillCorner(cx0, cy0, chamfer, 1, 1);
+    this.fillCorner(cx1 - 1, cy0, chamfer, -1, 1);
+    this.fillCorner(cx0, cy1 - 1, chamfer, 1, -1);
+    this.fillCorner(cx1 - 1, cy1 - 1, chamfer, -1, -1);
+  }
+
+  /** Put solid clutter back inside a carved space (pillars, cars, racks). */
+  fill(cx0: number, cy0: number, cx1: number, cy1: number): void {
+    for (let y = cy0; y < cy1; y++) for (let x = cx0; x < cx1; x++) this.set(x, y, 1);
+  }
+
+  /** Greedy rect decomposition of the remaining solid cells. */
+  toWalls(): Wall[] {
+    const used = new Uint8Array(COLS * ROWS);
+    const walls: Wall[] = [];
+    for (let y = 0; y < ROWS; y++) {
+      for (let x = 0; x < COLS; x++) {
+        const i = y * COLS + x;
+        if (!this.grid[i] || used[i]) continue;
+        let w = 1; // grow right
+        while (x + w < COLS && this.grid[i + w] && !used[i + w]) w++;
+        let h = 1; // grow down while the full span stays solid+unused
+        outer: while (y + h < ROWS) {
+          for (let k = 0; k < w; k++) {
+            const j = (y + h) * COLS + x + k;
+            if (!this.grid[j] || used[j]) break outer;
+          }
+          h++;
+        }
+        for (let yy = 0; yy < h; yy++) for (let xx = 0; xx < w; xx++) used[(y + yy) * COLS + x + xx] = 1;
+        walls.push({ x: x * CELL, y: y * CELL, w: w * CELL, h: h * CELL });
+      }
+    }
+    return walls;
+  }
 }
 
-/** Vertical wall from y0..y1 at x, with [startY, height] gaps left open. */
-function vwall(walls: Wall[], x: number, y0: number, y1: number, gaps: [number, number][] = []): void {
-  let cur = y0;
-  for (const [gy, gh] of [...gaps].sort((a, b) => a[0] - b[0])) {
-    if (gy > cur) walls.push({ x, y: cur, w: T, h: gy - cur });
-    cur = gy + gh;
-  }
-  if (cur < y1) walls.push({ x, y: cur, w: T, h: y1 - cur });
-}
+const px = (c: number): number => c * CELL;
 
 /**
- * "Kino pattern" complex, 5760×2160 (6×4 screens): a central LOBBY gated to
- * two wings, everything converging on a huge GRAND HALL; a service corridor
- * and five lock-up rooms line the south. The D6 "power" door (lobby↔hall)
- * unlocks late and completes the big perimeter loop (CoD Zombies pacing).
+ * "The Facility" — 8640×3840 (9×7 screens) carved out of solid rock.
  *
- *   ┌─────────┬──────────────────────────────────────┬───────────┐
- *   │ PARKING │        GRAND HALL  [][ pillars ][]   │ WAREHOUSE │
- *   ├──stairs─┴───────────D6(w6)───────────┬─────────┴──stairs───┤
- *   │ W.LAB │ W.OFFICE  D1(w2) LOBBY D2(w2)│ KITCHEN │  E.WARD   │
- *   ├─stairs┴──────────────D5(w3)──────────┴─────────────stairs──┤
- *   │                  SERVICE CORRIDOR (spawns)                 │
- *   ├──d──────────d──────────d──────────d──────────d─────────────┤
- *   │ W.CLOSET │ ARMORY │  MORGUE  │ STORAGE │ E.CLOSET          │
- *   └────────────────────────────────────────────────────────────┘
- *
- * Design rules (map research): every combat room ≥2 entrances (lock-ups are
- * the deliberate one-door exception), corridors 240+ px, door gaps 100–120,
- * hall has training pillars, rooms cap near one screen so the flashlight
- * stays meaningful, and spawn zones activate with their room's gate.
+ * Octagonal LOBBY dead-center; a chamfered GRAND HALL north behind the D6
+ * power door; office cluster west behind D1; medical wing east behind D2;
+ * parking and warehouse in the far corners, tied to the hall by DIAGONAL
+ * galleries; and under everything a WINDING SEWER with dens, a collapsed
+ * cave zone and a generator room, reached through D5. Gate pacing follows
+ * the CoD unlock loop: D1/D2 wave 2 → D5 wave 3 → D6 wave 6 closes the loop.
  */
 export function buildMap(): MapDef {
-  const W = 5760;
-  const H = 2160;
-  const walls: Wall[] = [];
+  const c = new Carver();
 
-  // outer border
-  hwall(walls, 0, 0, W);
-  hwall(walls, H - T, 0, W);
-  vwall(walls, 0, T, H - T);
-  vwall(walls, W - T, T, H - T);
+  // ── center: octagonal lobby (player start)
+  c.octagon(60, 23, 85, 42, 6);
 
-  // ── north band (y 0..700): PARKING | GRAND HALL | WAREHOUSE
-  vwall(walls, 1400, T, 700, [[300, 110]]); // parking↔hall (interior door)
-  vwall(walls, 4300, T, 700, [[300, 110]]); // hall↔warehouse (interior door)
-  walls.push({ x: 2300, y: 280, w: 240, h: 140 }); // hall training pillars
-  walls.push({ x: 3300, y: 280, w: 240, h: 140 });
+  // ── north: grand hall (chamfered), two carved-back pillars
+  c.octagon(52, 3, 97, 19, 5);
+  c.fill(63, 8, 66, 12); // training pillars
+  c.fill(83, 8, 86, 12);
+  c.line(72, 19, 72, 24, 2); // hall↔lobby throat (D6 power door)
 
-  // ── north/middle divider (y 700): parking↔lab stairs, D6 power door, warehouse↔ward stairs
-  hwall(walls, 700, T, W - T, [
-    [280, 120],
-    [2790, 120], // D6
-    [4980, 120],
-  ]);
+  // ── west: staggered office cluster behind D1
+  c.rect(28, 21, 45, 31);
+  c.rect(31, 34, 48, 45);
+  c.line(44, 26, 52, 26, 2); // upper office↔lower link corridor
+  c.line(45, 39, 60, 33, 2); // offices → lobby approach (diagonal)
+  c.line(52, 26, 56, 31, 2);
+  c.line(56, 31, 60, 32, 2); // D1 sits here
 
-  // ── middle band (y 700..1430): W.LAB | W.OFFICE | LOBBY | KITCHEN | E.WARD
-  vwall(walls, 900, 724, 1430, [[1000, 110]]); // lab↔office (interior door)
-  vwall(walls, 1900, 724, 1430, [[1020, 110]]); // D1 gate lobby↔office
-  vwall(walls, 3800, 724, 1430, [[1020, 110]]); // D2 gate lobby↔kitchen
-  vwall(walls, 4800, 724, 1430, [[1000, 110]]); // kitchen↔ward (interior door)
-  walls.push({ x: 2450, y: 1040, w: 180, h: 90 }); // lobby cover blocks
-  walls.push({ x: 3150, y: 1040, w: 180, h: 90 });
+  // ── far west: parking garage + diagonal atrium gallery up to the hall
+  c.rect(4, 4, 24, 20);
+  c.line(24, 12, 30, 22, 2); // parking → offices ramp (diagonal)
+  c.line(20, 6, 52, 8, 2); // collapsed atrium gallery → hall (long diagonal)
 
-  // ── furniture & clutter: break the boxes into real rooms (all solid cover)
-  walls.push(
-    // parking: wrecked cars in rows
-    { x: 220, y: 160, w: 120, h: 52 },
-    { x: 460, y: 150, w: 120, h: 52 },
-    { x: 760, y: 170, w: 120, h: 52 },
-    { x: 340, y: 420, w: 120, h: 52 },
-    { x: 820, y: 460, w: 120, h: 52 },
-    { x: 1120, y: 300, w: 52, h: 120 }, // one parked sideways
-    // warehouse: crate stacks
-    { x: 4520, y: 140, w: 130, h: 130 },
-    { x: 4780, y: 300, w: 100, h: 100 },
-    { x: 5150, y: 130, w: 130, h: 130 },
-    { x: 5350, y: 420, w: 100, h: 100 },
-    { x: 4950, y: 540, w: 130, h: 90 },
-    // lab: work tables
-    { x: 300, y: 900, w: 180, h: 60 },
-    { x: 540, y: 1160, w: 180, h: 60 },
-    { x: 180, y: 1250, w: 60, h: 120 },
-    // office: desk grid
-    { x: 1150, y: 880, w: 130, h: 70 },
-    { x: 1450, y: 880, w: 130, h: 70 },
-    { x: 1300, y: 1120, w: 130, h: 70 },
-    { x: 1620, y: 1250, w: 130, h: 70 },
-    // kitchen: L-shaped counters
-    { x: 4200, y: 1060, w: 260, h: 70 },
-    { x: 4130, y: 850, w: 70, h: 210 },
-    { x: 4550, y: 820, w: 180, h: 60 },
-    // ward: bed rows
-    { x: 4980, y: 800, w: 110, h: 50 },
-    { x: 5250, y: 800, w: 110, h: 50 },
-    { x: 4980, y: 1250, w: 110, h: 50 },
-    { x: 5250, y: 1250, w: 110, h: 50 },
-    { x: 5520, y: 1020, w: 110, h: 50 },
-    // grand hall: column posts flanking the pillars
-    { x: 1800, y: 180, w: 48, h: 48 },
-    { x: 1800, y: 480, w: 48, h: 48 },
-    { x: 2900, y: 120, w: 48, h: 48 },
-    { x: 2900, y: 520, w: 48, h: 48 },
-    { x: 3900, y: 180, w: 48, h: 48 },
-    { x: 3900, y: 480, w: 48, h: 48 },
-    // service corridor: abandoned crates
-    { x: 900, y: 1510, w: 90, h: 60 },
-    { x: 3620, y: 1580, w: 90, h: 60 },
-    { x: 4650, y: 1490, w: 90, h: 60 },
-    // lock-ups: armory racks, morgue slabs, storage shelving
-    { x: 1300, y: 1850, w: 70, h: 180 },
-    { x: 1560, y: 1850, w: 70, h: 180 },
-    { x: 1850, y: 1900, w: 70, h: 180 },
-    { x: 2500, y: 1850, w: 90, h: 150 },
-    { x: 2760, y: 1850, w: 90, h: 150 },
-    { x: 3050, y: 1900, w: 90, h: 150 },
-    { x: 3700, y: 1850, w: 220, h: 60 },
-    { x: 3700, y: 2010, w: 220, h: 60 },
-    { x: 4150, y: 1850, w: 220, h: 60 },
-    // buttresses breaking the long straight border walls
-    { x: 800, y: 24, w: 90, h: 56 },
-    { x: 2600, y: 24, w: 70, h: 56 },
-    { x: 3700, y: 24, w: 70, h: 56 },
-    { x: 4800, y: 24, w: 90, h: 56 },
-    { x: 24, y: 380, w: 56, h: 90 },
-    { x: 24, y: 1150, w: 56, h: 90 },
-    { x: 5680, y: 420, w: 56, h: 90 },
-    { x: 5680, y: 1100, w: 56, h: 90 },
-    { x: 1500, y: 2056, w: 90, h: 56 },
-    { x: 4400, y: 2056, w: 90, h: 56 },
-  );
+  // ── east: medical wing (ward + morgue) behind D2
+  c.octagon(100, 21, 118, 34, 3);
+  c.rect(104, 37, 122, 48);
+  c.line(110, 34, 112, 37, 2); // ward↔morgue stair
+  c.line(85, 32, 100, 27, 2); // lobby → ward approach (diagonal, D2 here)
 
-  // ── middle/south divider (y 1430): lab stairs, D5 gate, ward stairs
-  hwall(walls, 1430, T, W - T, [
-    [180, 120],
-    [2790, 120], // D5
-    [5460, 120],
-  ]);
+  // ── far east: warehouse + gallery down from it
+  c.octagon(120, 5, 141, 21, 4);
+  c.line(97, 9, 120, 12, 2); // hall → warehouse gallery (diagonal)
+  c.line(118, 21, 112, 26, 2); // warehouse → ward shortcut
 
-  // ── south: SERVICE CORRIDOR (y 1454..1700), lock-up row below (y 1724..)
-  hwall(walls, 1700, T, W - T, [
-    [500, 100],
-    [1700, 100],
-    [2850, 100],
-    [4000, 100],
-    [5200, 100],
-  ]);
-  vwall(walls, 1100, 1724, H - T); // lock-up dividers
-  vwall(walls, 2300, 1724, H - T);
-  vwall(walls, 3500, 1724, H - T);
-  vwall(walls, 4700, 1724, H - T);
+  // ── south: winding sewer with dens, cave collapse, generator room
+  c.line(72, 42, 72, 48, 2); // lobby → sewer drop (D5)
+  c.line(72, 48, 56, 52, 2);
+  c.line(56, 52, 40, 56, 2);
+  c.disc(40, 56, 4); // west den
+  c.line(40, 56, 22, 51, 2);
+  // cave collapse zone: overlapping pockets
+  c.disc(24, 50, 4);
+  c.disc(18, 53, 5);
+  c.disc(12, 49, 4);
+  c.disc(14, 57, 3);
+  c.line(72, 48, 90, 54, 2);
+  c.disc(90, 54, 4); // east den
+  c.line(90, 54, 112, 50, 2);
+  c.line(112, 50, 126, 55, 2);
+  c.rect(126, 50, 139, 60); // generator room
+  c.line(116, 37, 112, 50, 2); // morgue → sewer back stair (loop!)
+
+  // ── clutter: cars, crates, racks, slabs (solid, breaks sightlines)
+  c.fill(8, 8, 10, 10);
+  c.fill(13, 7, 15, 9);
+  c.fill(18, 12, 20, 14);
+  c.fill(9, 15, 11, 17); // parking cars
+  c.fill(125, 9, 128, 12);
+  c.fill(131, 14, 134, 17);
+  c.fill(136, 7, 138, 9); // warehouse crates
+  c.fill(33, 24, 35, 26);
+  c.fill(40, 27, 42, 29);
+  c.fill(35, 38, 37, 40);
+  c.fill(43, 41, 45, 43); // office desks
+  c.fill(105, 25, 107, 27);
+  c.fill(112, 29, 114, 31); // ward beds
+  c.fill(109, 41, 111, 44);
+  c.fill(116, 41, 118, 44); // morgue slabs
+  c.fill(130, 53, 132, 57); // generator block
+  c.fill(70, 29, 72, 31);
+  c.fill(76, 34, 78, 36); // lobby cover
 
   return {
-    width: W,
-    height: H,
-    walls,
+    width: COLS * CELL,
+    height: ROWS * CELL,
+    walls: c.toWalls(),
     doors: [
-      { x: 1400, y: 300, w: T, h: 110, open: false, minWave: 0 }, // parking↔hall
-      { x: 4300, y: 300, w: T, h: 110, open: false, minWave: 0 }, // hall↔warehouse
-      { x: 900, y: 1000, w: T, h: 110, open: false, minWave: 0 }, // lab↔office
-      { x: 4800, y: 1000, w: T, h: 110, open: false, minWave: 0 }, // kitchen↔ward
-      { x: 1900, y: 1020, w: T, h: 110, open: false, minWave: 2 }, // D1 lobby→west wing
-      { x: 3800, y: 1020, w: T, h: 110, open: false, minWave: 2 }, // D2 lobby→east wing
-      { x: 2790, y: 1430, w: 120, h: T, open: false, minWave: 3 }, // D5 lobby→corridor
-      { x: 2790, y: 700, w: 120, h: T, open: false, minWave: 6 }, // D6 "power" lobby↔hall
-      { x: 500, y: 1700, w: 100, h: T, open: false, minWave: 0 }, // w.closet
-      { x: 1700, y: 1700, w: 100, h: T, open: false, minWave: 0 }, // armory
-      { x: 2850, y: 1700, w: 100, h: T, open: false, minWave: 0 }, // morgue
-      { x: 4000, y: 1700, w: 100, h: T, open: false, minWave: 0 }, // storage
-      { x: 5200, y: 1700, w: 100, h: T, open: false, minWave: 0 }, // e.closet
+      // gate spans exceed the carved corridor so nothing slips around the frame
+      { x: px(58), y: px(29), w: 24, h: px(5), open: false, minWave: 2 }, // D1 west gate
+      { x: px(93), y: px(27), w: 24, h: px(5), open: false, minWave: 2 }, // D2 east gate
+      { x: px(70), y: px(44), w: px(5), h: 24, open: false, minWave: 3 }, // D5 sewer gate
+      { x: px(70), y: px(21), w: px(5), h: 24, open: false, minWave: 6 }, // D6 power door
+      { x: px(47), y: px(24), w: 24, h: px(5), open: false, minWave: 0 }, // office link
+      { x: px(108), y: px(35), w: px(5), h: 24, open: false, minWave: 0 }, // ward↔morgue
+      { x: px(119), y: px(10), w: 24, h: px(4), open: false, minWave: 0 }, // warehouse gallery
+      { x: px(126), y: px(52), w: 24, h: px(6), open: false, minWave: 0 }, // generator room
+      { x: px(25), y: px(49), w: 24, h: px(5), open: false, minWave: 0 }, // cave mouth
     ],
     spawnZones: [
-      // lobby "windows" — wave 1 pressure at the room edges
-      { x: 1960, y: 780, minWave: 1 },
-      { x: 3740, y: 1380, minWave: 1 },
-      // west wing (behind D1)
-      { x: 1000, y: 780, minWave: 2 },
-      { x: 120, y: 800, minWave: 2 },
-      // east wing (behind D2)
-      { x: 3900, y: 780, minWave: 2 },
-      { x: 5660, y: 800, minWave: 2 },
-      // north band (reachable via wings)
-      { x: 100, y: 100, minWave: 2 },
-      { x: 1300, y: 600, minWave: 2 },
-      { x: 1500, y: 100, minWave: 2 },
-      { x: 2850, y: 100, minWave: 2 },
-      { x: 4200, y: 600, minWave: 2 },
-      { x: 4400, y: 100, minWave: 2 },
-      { x: 5660, y: 100, minWave: 2 },
-      // south corridor + lock-ups (behind D5)
-      { x: 100, y: 1560, minWave: 3 },
-      { x: 2850, y: 1560, minWave: 3 },
-      { x: 5660, y: 1560, minWave: 3 },
-      { x: 1800, y: 2050, minWave: 3 },
-      { x: 2900, y: 2050, minWave: 3 },
-      { x: 4100, y: 2050, minWave: 3 },
+      // lobby edges — wave 1 pressure (cell centers, clear of the chamfers)
+      { x: px(66) + 30, y: px(25) + 30, minWave: 1 },
+      { x: px(78) + 30, y: px(38) + 30, minWave: 1 },
+      // wings + north (wave 2)
+      { x: px(30) + 30, y: px(23) + 30, minWave: 2 },
+      { x: px(46) + 30, y: px(43) + 30, minWave: 2 },
+      { x: px(6) + 30, y: px(6) + 30, minWave: 2 },
+      { x: px(22) + 30, y: px(18) + 30, minWave: 2 },
+      { x: px(56) + 30, y: px(6) + 30, minWave: 2 },
+      { x: px(92) + 30, y: px(14) + 30, minWave: 2 },
+      { x: px(102) + 30, y: px(23) + 30, minWave: 2 },
+      { x: px(120) + 30, y: px(46) + 30, minWave: 2 },
+      { x: px(122) + 30, y: px(7) + 30, minWave: 2 },
+      { x: px(137) + 30, y: px(17) + 30, minWave: 2 },
+      // sewers, cave, generator (wave 3)
+      { x: px(40) + 30, y: px(56) + 30, minWave: 3 },
+      { x: px(90) + 30, y: px(54) + 30, minWave: 3 },
+      { x: px(14) + 30, y: px(52) + 30, minWave: 3 },
+      { x: px(136) + 30, y: px(57) + 30, minWave: 3 },
+      { x: px(56) + 30, y: px(52) + 30, minWave: 3 },
+      { x: px(112) + 30, y: px(50) + 30, minWave: 3 },
     ],
-    playerStart: { x: 2850, y: 1080 },
+    playerStart: { x: px(72) + 30, y: px(32) + 30 },
   };
 }
 

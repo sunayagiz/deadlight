@@ -49,17 +49,16 @@ const ASSETS = [
 
 const SOUNDS = ['shot', 'shotgun', 'explosion', 'squelch', 'whoosh', 'hurt', 'door', 'heartbeat'] as const;
 
-/** View-only room decor: subtle floor tint per area so rooms feel distinct, plus minimap labels. */
+/** View-only room decor: subtle floor tint per area so rooms feel distinct. */
 const ROOM_TINTS: { x: number; y: number; w: number; h: number; color: number; alpha: number }[] = [
-  { x: 24, y: 24, w: 1376, h: 676, color: 0x2a3550, alpha: 0.12 }, // parking — cold blue
-  { x: 1424, y: 24, w: 2876, h: 676, color: 0x403018, alpha: 0.1 }, // grand hall — warm
-  { x: 4324, y: 24, w: 1412, h: 676, color: 0x33291f, alpha: 0.12 }, // warehouse — cardboard
-  { x: 24, y: 724, w: 876, h: 706, color: 0x1f3a2a, alpha: 0.14 }, // lab — sickly green
-  { x: 924, y: 724, w: 976, h: 706, color: 0x2e2a22, alpha: 0.1 }, // office
-  { x: 3824, y: 724, w: 976, h: 706, color: 0x3a3426, alpha: 0.1 }, // kitchen
-  { x: 4824, y: 724, w: 912, h: 706, color: 0x203038, alpha: 0.12 }, // ward — clinical
-  { x: 24, y: 1454, w: 5712, h: 246, color: 0x0c0e14, alpha: 0.3 }, // corridor — near black
-  { x: 2324, y: 1724, w: 1176, h: 412, color: 0x24303a, alpha: 0.16 }, // morgue — cold
+  { x: 240, y: 240, w: 1200, h: 960, color: 0x2a3550, alpha: 0.12 }, // parking — cold blue
+  { x: 3120, y: 180, w: 2700, h: 960, color: 0x403018, alpha: 0.1 }, // grand hall — warm
+  { x: 7200, y: 300, w: 1260, h: 960, color: 0x33291f, alpha: 0.12 }, // warehouse — cardboard
+  { x: 1680, y: 1260, w: 1200, h: 1440, color: 0x2e2a22, alpha: 0.12 }, // office cluster
+  { x: 6000, y: 1260, w: 1320, h: 1620, color: 0x203038, alpha: 0.12 }, // medical — clinical
+  { x: 600, y: 2880, w: 7800, h: 720, color: 0x101c16, alpha: 0.32 }, // sewers — rotten dark
+  { x: 480, y: 2760, w: 1200, h: 840, color: 0x2c2318, alpha: 0.22 }, // cave collapse — earth
+  { x: 7560, y: 3000, w: 780, h: 600, color: 0x3a2f16, alpha: 0.18 }, // generator — amber
 ];
 
 interface SpriteItem {
@@ -139,8 +138,12 @@ export class GameScene extends Phaser.Scene {
     });
 
     // Debug/playtest: ?wave=N jumps straight to wave N with a short countdown;
-    // ?zoo=1 lines up one of every enemy type for sprite inspection.
+    // ?zoo=1 lines up one of every enemy type; ?at=x,y teleports the start.
     const qs = new URLSearchParams(window.location.search);
+    const at = (qs.get('at') ?? '').split(',').map(Number);
+    if (at.length === 2 && at.every(Number.isFinite)) {
+      this.state.player.pos = { x: at[0], y: at[1] };
+    }
     const debugWave = Number(qs.get('wave'));
     if (debugWave > 0) {
       this.state.wave.index = debugWave;
@@ -418,8 +421,8 @@ export class GameScene extends Phaser.Scene {
         g.fillStyle(d.open ? 0x3a4a3a : 0x8a5a2a, 1);
         g.fillRect(mx + d.x * scale, my + d.y * scale, Math.max(2, d.w * scale), Math.max(2, d.h * scale));
       }
-      // shadow every unexplored cell back out
-      g.fillStyle(0x05060a, 0.93);
+      // shadow every unexplored cell back out (near-opaque: layout stays secret)
+      g.fillStyle(0x05060a, 0.975);
       const cw = cell * scale;
       for (let cy = 0; cy < rows; cy++) {
         for (let cx = 0; cx < cols; cx++) {
@@ -496,6 +499,10 @@ export class GameScene extends Phaser.Scene {
 
     const solids = mapSolids(this.state);
     const eye = { x, y };
+    // Off-screen entities can never be seen — skip their LOS raycasts entirely.
+    const view = cam.worldView;
+    const onScreen = (ex: number, ey: number): boolean =>
+      ex > view.x - 90 && ex < view.right + 90 && ey > view.y - 90 && ey < view.bottom + 90;
 
     // Melee swing wedge.
     const def = WEAPONS[p.weapon];
@@ -546,7 +553,7 @@ export class GameScene extends Phaser.Scene {
         texture: e.type,
         height: ZOMBIES[e.type].radius * 4.0,
         rotation: (e.vel.x || e.vel.y) ? Math.atan2(e.vel.y, e.vel.x) - ART_FACING : 0,
-        visible: segmentClear(eye, e.pos, solids),
+        visible: onScreen(e.pos.x, e.pos.y) && segmentClear(eye, e.pos, solids),
         tintFill: e.boss && e.boss.telegraph > 0 ? COLORS.telegraphTint : e.hitFlash > 0 ? 0xffffff : undefined,
         wobble: e.boss ? 0.05 : 0.11, // shamble sway; heavier bodies sway less
       })),
@@ -574,7 +581,7 @@ export class GameScene extends Phaser.Scene {
         texture: l.kind === 'weapon' ? `wpn_${l.weapon}` : 'ammo',
         height: 26,
         rotation: 0,
-        visible: segmentClear(eye, l.pos, solids),
+        visible: onScreen(l.pos.x, l.pos.y) && segmentClear(eye, l.pos, solids),
       })),
     );
 

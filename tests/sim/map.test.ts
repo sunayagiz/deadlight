@@ -14,16 +14,34 @@ function bigMapState() {
 }
 
 describe('map + doors', () => {
-  it('buildMap: 6x4-screen complex with gated progression', () => {
+  it('buildMap: 9x7-screen carved facility with gated progression', () => {
     const m = buildMap();
-    expect(m.width).toBe(5760);
-    expect(m.height).toBe(2160);
-    expect(m.walls.length).toBeGreaterThan(20);
-    expect(m.doors.length).toBeGreaterThanOrEqual(10);
+    expect(m.width).toBe(8640);
+    expect(m.height).toBe(3840);
+    expect(m.walls.length).toBeGreaterThan(50); // carved geometry decomposes into many rects
+    expect(m.doors.length).toBeGreaterThanOrEqual(8);
     expect(m.doors.every((d) => !d.open)).toBe(true); // all start closed
     expect(m.doors.some((d) => d.minWave >= 2)).toBe(true); // gates exist
     expect(m.spawnZones.some((z) => (z.minWave ?? 0) <= 1)).toBe(true); // wave-1 pressure exists
     expect(m.spawnZones.length).toBeGreaterThanOrEqual(15);
+  });
+
+  it('no spawn zone or the player start is buried in rock', () => {
+    const m = buildMap();
+    const inSolid = (x: number, y: number) =>
+      m.walls.some((w) => x > w.x && x < w.x + w.w && y > w.y && y < w.y + w.h);
+    const clear = (x: number, y: number) =>
+      [
+        [0, 0],
+        [-20, 0],
+        [20, 0],
+        [0, -20],
+        [0, 20],
+      ].every(([dx, dy]) => !inSolid(x + dx, y + dy));
+    expect(clear(m.playerStart.x, m.playerStart.y)).toBe(true);
+    for (const z of m.spawnZones) {
+      expect(clear(z.x, z.y), `zone ${z.x},${z.y}`).toBe(true);
+    }
   });
 
   it('mapSolids counts closed doors as solid and drops open ones', () => {
@@ -81,7 +99,7 @@ describe('line of sight', () => {
 
   it('the lobby cannot see into the sealed grand hall', () => {
     const s = bigMapState();
-    // from lobby start straight north to hall center: blocked by the divider + closed D6
-    expect(segmentClear(s.player.pos, { x: 2850, y: 350 }, mapSolids(s))).toBe(false);
+    // from lobby start straight north to hall center: blocked by rock + closed D6
+    expect(segmentClear(s.player.pos, { x: 4440, y: 600 }, mapSolids(s))).toBe(false);
   });
 });

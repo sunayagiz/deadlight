@@ -41,10 +41,10 @@ describe('flow field', () => {
       width: m.width,
       height: m.height,
     });
-    // zombie in the west office; player in the lobby; divider wall between them.
-    // open the D1 gate so a path exists (gate at x 1900, gap y 1020..1130)
-    s.doors.find((d) => d.minWave === 2 && d.x === 1900)!.open = true;
-    const e = spawnEnemy(s, 'runner', { x: 1400, y: 800 });
+    // zombie in the west office; player in the lobby; rock between them.
+    // open the D1 gate so a path exists (gate at x 3480)
+    s.doors.find((d) => d.minWave === 2 && d.x === 3480)!.open = true;
+    const e = spawnEnemy(s, 'runner', { x: 2160, y: 1560 });
     const before = Math.hypot(s.player.pos.x - e.pos.x, s.player.pos.y - e.pos.y);
     for (let i = 0; i < 60 * 8; i++) stepSim(s, emptyInput(), SIM_DT, () => 0.99);
     const after = Math.hypot(s.player.pos.x - e.pos.x, s.player.pos.y - e.pos.y);
@@ -59,6 +59,6 @@ describe('flow field', () => {
     });
     const f = computeFlowField(s.mapW, s.mapH, mapSolids(s), [s.player.pos]);
     // cell in the middle of closed D1's gap: blocked, so no direction
-    expect(sampleFlow(f, 1912, 1075)).toBeNull();
+    expect(sampleFlow(f, 3492, 1890)).toBeNull();
   });
 });
