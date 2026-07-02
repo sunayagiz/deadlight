@@ -39,8 +39,8 @@ function affordable(index: number, budget: number): EnemyType[] {
 }
 
 /** Spend the wave's budget on random affordable enemy rows to build a spawn queue. */
-export function buildWaveQueue(index: number, rng: Rng): EnemyType[] {
-  let budget = waveBudget(index);
+export function buildWaveQueue(index: number, rng: Rng, squad = 1): EnemyType[] {
+  let budget = Math.round(waveBudget(index) * (0.6 + 0.4 * squad)); // +40% per extra player
   const queue: EnemyType[] = [];
   for (;;) {
     const opts = affordable(index, budget);
@@ -67,15 +67,19 @@ function angleDiff(a: number, b: number): number {
  */
 function zoneValid(state: GameState, z: SpawnZone): boolean {
   if ((z.minWave ?? 0) > state.wave.index) return false;
-  const p = state.player;
-  const dx = z.x - p.pos.x;
-  const dy = z.y - p.pos.y;
-  const dist = Math.hypot(dx, dy);
-  if (dist < SPAWN_MIN_DIST) return false;
-  const inCone =
-    dist < FLASHLIGHT_RANGE * SPAWN_SIGHT_DIST &&
-    Math.abs(angleDiff(Math.atan2(dy, dx), p.aimAngle)) < FLASHLIGHT_HALF_ANGLE * 1.25;
-  if (inCone && segmentClear(p.pos, { x: z.x, y: z.y }, mapSolids(state))) return false;
+  const solids = mapSolids(state);
+  // rejected if it's too close to, or inside the lit view of, ANY standing player
+  for (const p of state.players) {
+    if (!p.alive || p.downed) continue;
+    const dx = z.x - p.pos.x;
+    const dy = z.y - p.pos.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist < SPAWN_MIN_DIST) return false;
+    const inCone =
+      dist < FLASHLIGHT_RANGE * SPAWN_SIGHT_DIST &&
+      Math.abs(angleDiff(Math.atan2(dy, dx), p.aimAngle)) < FLASHLIGHT_HALF_ANGLE * 1.25;
+    if (inCone && segmentClear(p.pos, { x: z.x, y: z.y }, solids)) return false;
+  }
   return true;
 }
 
@@ -86,20 +90,22 @@ function pickZone(state: GameState, rng: Rng): SpawnZone | null {
   return valid[Math.floor(rng() * valid.length) % valid.length];
 }
 
-/** Least-bad zone for a boss entrance: unlocked and farthest from the player. */
+/** Least-bad zone for a boss entrance: unlocked and farthest from the squad's centroid. */
 function pickBossZone(state: GameState): SpawnZone {
-  const p = state.player;
+  const up = state.players.filter((p) => p.alive);
+  const cx = up.reduce((s, p) => s + p.pos.x, 0) / (up.length || 1);
+  const cy = up.reduce((s, p) => s + p.pos.y, 0) / (up.length || 1);
   const eligible = state.spawnZones.filter((z) => (z.minWave ?? 0) <= state.wave.index);
   const pool = eligible.length > 0 ? eligible : [{ x: 24, y: 24 }];
-  return pool.reduce((a, b) =>
-    Math.hypot(a.x - p.pos.x, a.y - p.pos.y) >= Math.hypot(b.x - p.pos.x, b.y - p.pos.y) ? a : b,
-  );
+  return pool.reduce((a, b) => (Math.hypot(a.x - cx, a.y - cy) >= Math.hypot(b.x - cx, b.y - cy) ? a : b));
 }
 
 function startWave(state: GameState, rng: Rng): void {
   const wave = state.wave;
   wave.phase = 'active';
-  wave.spawnQueue = buildWaveQueue(wave.index, rng);
+  // budget scales with how many players are still in the fight
+  const squad = Math.max(1, state.players.filter((p) => p.alive).length);
+  wave.spawnQueue = buildWaveQueue(wave.index, rng, squad);
   wave.spawnCooldown = 0; // first enemy spawns on the next tick
   wave.killsThisWave = 0;
   if (isBossWave(wave.index)) {

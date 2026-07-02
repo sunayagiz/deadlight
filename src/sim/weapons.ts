@@ -63,11 +63,11 @@ export function hasAmmo(p: PlayerState, def: WeaponDef): boolean {
 /** Guns and the RPG spawn bullets here. Melee is resolved separately in melee.ts. */
 export function updateFiring(
   state: GameState,
+  p: PlayerState,
   input: PlayerInput,
   dt: number,
   rng: () => number = Math.random,
 ): void {
-  const p = state.player;
   p.fireCooldown = Math.max(0, p.fireCooldown - dt);
   const def = WEAPONS[p.weapon];
 

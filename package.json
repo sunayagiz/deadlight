@@ -28,6 +28,7 @@
   },
   "homepage": "https://github.com/sunayagiz/deadlight#readme",
   "dependencies": {
+    "peerjs": "^1.5.5",
     "phaser": "^3.90.0"
   },
   "devDependencies": {

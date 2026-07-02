@@ -57,16 +57,17 @@ function applyPickup(p: PlayerState, l: LootState): void {
 }
 
 export function updateLoot(state: GameState, dt: number): void {
-  const p = state.player;
   const rr = PLAYER_RADIUS + LOOT_RADIUS;
   const kept: LootState[] = [];
   for (const l of state.loot) {
     l.ttl -= dt;
     if (l.ttl <= 0) continue;
-    const dx = p.pos.x - l.pos.x;
-    const dy = p.pos.y - l.pos.y;
-    if (!state.gameOver && dx * dx + dy * dy <= rr * rr) {
-      applyPickup(p, l);
+    // the first standing player to walk over it grabs it
+    const taker = state.players.find(
+      (p) => p.alive && !p.downed && (p.pos.x - l.pos.x) ** 2 + (p.pos.y - l.pos.y) ** 2 <= rr * rr,
+    );
+    if (!state.gameOver && taker) {
+      applyPickup(taker, l);
       continue; // consumed
     }
     kept.push(l);

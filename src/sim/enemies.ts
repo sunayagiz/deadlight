@@ -68,20 +68,27 @@ function separation(e: EnemyState, enemies: EnemyState[]): { x: number; y: numbe
 
 export function updateEnemies(
   enemies: EnemyState[],
-  player: PlayerState,
+  players: PlayerState[],
   walls: Wall[],
   dt: number,
   flow?: FlowField,
 ): void {
+  const targets = players.filter((p) => p.alive && !p.downed);
+  const pool = targets.length > 0 ? targets : players;
+  const nearest = (e: EnemyState): PlayerState =>
+    pool.reduce((a, b) =>
+      (a.pos.x - e.pos.x) ** 2 + (a.pos.y - e.pos.y) ** 2 <= (b.pos.x - e.pos.x) ** 2 + (b.pos.y - e.pos.y) ** 2 ? a : b,
+    );
   for (const e of enemies) {
     e.hitFlash = Math.max(0, e.hitFlash - dt);
     const def = ZOMBIES[e.type];
 
-    // Route via the flow field (handles rooms/doors); fall back to straight
-    // seek when off-grid or unreachable. Separation keeps the horde spread.
+    // Route via the flow field (handles rooms/doors, already multi-source); fall
+    // back to straight seek toward the nearest player when off-grid/unreachable.
+    const tp = nearest(e);
     const seek =
       (flow && sampleFlow(flow, e.pos.x, e.pos.y)) ??
-      norm({ x: player.pos.x - e.pos.x, y: player.pos.y - e.pos.y });
+      norm({ x: tp.pos.x - e.pos.x, y: tp.pos.y - e.pos.y });
     const sep = separation(e, enemies);
     const desired = norm({
       x: seek.x * def.speed + sep.x * ENEMY_SEPARATION_FORCE,

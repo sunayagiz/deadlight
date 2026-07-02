@@ -14,7 +14,7 @@ describe('melee', () => {
     s.player.aimAngle = 0; // facing +x
     s.player.weapon = 'katana';
     const e = spawnEnemy(s, 'shambler', { x: 140, y: 100 }); // 40px ahead, within 64 reach
-    updateMelee(s, swing, SIM_DT);
+    updateMelee(s, s.player, swing, SIM_DT);
     expect(e.hp).toBe(ZOMBIES.shambler.hp - WEAPONS.katana.damage);
   });
 
@@ -24,7 +24,7 @@ describe('melee', () => {
     s.player.aimAngle = 0; // facing +x
     s.player.weapon = 'katana';
     const e = spawnEnemy(s, 'shambler', { x: 50, y: 100 }); // behind (−x)
-    updateMelee(s, swing, SIM_DT);
+    updateMelee(s, s.player, swing, SIM_DT);
     expect(e.hp).toBe(ZOMBIES.shambler.hp);
   });
 
@@ -34,7 +34,7 @@ describe('melee', () => {
     s.player.aimAngle = 0;
     s.player.weapon = 'katana';
     const e = spawnEnemy(s, 'shambler', { x: 400, y: 100 });
-    updateMelee(s, swing, SIM_DT);
+    updateMelee(s, s.player, swing, SIM_DT);
     expect(e.hp).toBe(ZOMBIES.shambler.hp);
   });
 
@@ -44,9 +44,9 @@ describe('melee', () => {
     s.player.aimAngle = 0;
     s.player.weapon = 'katana';
     const e = spawnEnemy(s, 'shambler', { x: 140, y: 100 });
-    updateMelee(s, swing, SIM_DT);
+    updateMelee(s, s.player, swing, SIM_DT);
     const afterFirst = e.hp;
-    updateMelee(s, swing, SIM_DT); // still on cooldown
+    updateMelee(s, s.player, swing, SIM_DT); // still on cooldown
     expect(e.hp).toBe(afterFirst);
   });
 
@@ -57,8 +57,8 @@ describe('melee', () => {
     s.player.weapon = 'chainsaw';
     s.player.ammo.chainsaw = 999;
     const e = spawnEnemy(s, 'runner', { x: 130, y: 100 });
-    updateMelee(s, swing, SIM_DT);
-    updateMelee(s, swing, SIM_DT);
+    updateMelee(s, s.player, swing, SIM_DT);
+    updateMelee(s, s.player, swing, SIM_DT);
     const expected = ZOMBIES.runner.hp - WEAPONS.chainsaw.damage * SIM_DT * 2;
     expect(e.hp).toBeCloseTo(expected);
   });
@@ -70,7 +70,7 @@ describe('melee', () => {
     s.player.weapon = 'chainsaw';
     s.player.ammo.chainsaw = 0;
     const e = spawnEnemy(s, 'runner', { x: 130, y: 100 });
-    updateMelee(s, swing, SIM_DT);
+    updateMelee(s, s.player, swing, SIM_DT);
     expect(e.hp).toBe(ZOMBIES.runner.hp);
   });
 });

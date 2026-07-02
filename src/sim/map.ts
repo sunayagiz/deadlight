@@ -173,15 +173,19 @@ export function mapSolids(state: GameState): Wall[] {
  * doors stay locked until their wave milestone (CoD-style progression).
  */
 export function updateDoors(state: GameState): void {
-  const player = state.player;
   for (const d of state.doors) {
     if (d.open) continue;
     if (d.minWave > 0 && state.wave.index < d.minWave) continue; // still sealed
     const cx = d.x + d.w / 2;
     const cy = d.y + d.h / 2;
-    const dx = player.pos.x - cx;
-    const dy = player.pos.y - cy;
     const reach = DOOR_OPEN_RADIUS + Math.max(d.w, d.h) / 2;
-    if (dx * dx + dy * dy <= reach * reach) d.open = true;
+    // any standing player can open it
+    const near = state.players.some((p) => {
+      if (!p.alive || p.downed) return false;
+      const dx = p.pos.x - cx;
+      const dy = p.pos.y - cy;
+      return dx * dx + dy * dy <= reach * reach;
+    });
+    if (near) d.open = true;
   }
 }

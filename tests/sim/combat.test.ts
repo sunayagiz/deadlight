@@ -54,14 +54,14 @@ describe('combat', () => {
     expect(s.player.hp).toBe(PLAYER_MAX_HP);
   });
 
-  it('player death clamps hp to 0 and sets gameOver', () => {
-    const s = createGameState([]);
+  it('a solo player dies (no revive possible) when hp runs out', () => {
+    const s = createGameState([]); // 1 player
     s.player.pos = { x: 100, y: 100 };
     s.player.hp = 1;
     spawnEnemy(s, 'brute', { x: 100, y: 100 });
     for (let i = 0; i < 10; i++) updateCombat(s, SIM_DT);
     expect(s.player.hp).toBe(0);
-    expect(s.gameOver).toBe(true);
+    expect(s.player.alive).toBe(false); // solo => dead outright; stepSim raises gameOver
   });
 });
 

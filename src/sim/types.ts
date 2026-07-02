@@ -44,6 +44,16 @@ export interface PlayerState {
     dirX: number;
     dirY: number;
   };
+  // co-op state
+  alive: boolean; // false = fully dead (bled out), a spectator
+  downed: boolean; // true = on the ground, revivable by a teammate
+  bleedout: number; // seconds left before a downed player dies
+  reviveProgress: number; // 0..1 while a teammate is reviving this one
+}
+
+/** A player is a live combat threat only while up. */
+export function isUp(p: PlayerState): boolean {
+  return p.alive && !p.downed;
 }
 
 export interface BulletState {
@@ -127,7 +137,8 @@ export interface GameState {
   time: number; // seconds
   mapW: number;
   mapH: number;
-  player: PlayerState;
+  players: PlayerState[]; // 1..4; host-authoritative
+  player: PlayerState; // alias to players[0], kept live by the sim (host/solo convenience)
   bullets: BulletState[];
   nextBulletId: number;
   enemies: EnemyState[];

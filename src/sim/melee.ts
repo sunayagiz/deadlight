@@ -1,6 +1,6 @@
 import { ZOMBIES } from './enemies';
 import { WEAPONS, type WeaponDef } from './weapons';
-import type { GameState, PlayerInput } from './types';
+import type { GameState, PlayerInput, PlayerState } from './types';
 
 const HIT_FLASH = 0.08;
 const SWING_TIME = 0.12; // seconds the swing arc is shown / active
@@ -14,8 +14,7 @@ function angleDiff(a: number, b: number): number {
 }
 
 /** Damage every enemy inside the weapon's reach and swing arc, centered on aim. */
-function hitArc(state: GameState, def: WeaponDef, damage: number): void {
-  const p = state.player;
+function hitArc(state: GameState, p: PlayerState, def: WeaponDef, damage: number): void {
   for (const e of state.enemies) {
     const dx = e.pos.x - p.pos.x;
     const dy = e.pos.y - p.pos.y;
@@ -32,8 +31,7 @@ function hitArc(state: GameState, def: WeaponDef, damage: number): void {
  * held weapons (chainsaw) apply continuous dps and burn fuel. fireCooldown is
  * decremented in updateFiring, so this only reads/sets it.
  */
-export function updateMelee(state: GameState, input: PlayerInput, dt: number): void {
-  const p = state.player;
+export function updateMelee(state: GameState, p: PlayerState, input: PlayerInput, dt: number): void {
   p.meleeSwing = Math.max(0, p.meleeSwing - dt);
 
   const def = WEAPONS[p.weapon];
@@ -43,12 +41,12 @@ export function updateMelee(state: GameState, input: PlayerInput, dt: number): v
   if (limited && (p.ammo[def.id] ?? 0) <= 0) return;
 
   if (def.hold) {
-    hitArc(state, def, def.damage * dt); // dps
+    hitArc(state, p, def, def.damage * dt); // dps
     p.meleeSwing = 0.05;
     if (limited) p.ammo[def.id] = (p.ammo[def.id] ?? 0) - dt;
   } else {
     if (p.fireCooldown > 0) return;
-    hitArc(state, def, def.damage);
+    hitArc(state, p, def, def.damage);
     p.fireCooldown = 1 / def.fireRate;
     p.meleeSwing = SWING_TIME;
   }

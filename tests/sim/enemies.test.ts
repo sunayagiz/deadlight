@@ -21,7 +21,7 @@ describe('enemies', () => {
     s.player.pos = { x: 500, y: 100 };
     const e = spawnEnemy(s, 'shambler', { x: 100, y: 100 });
     const before = Math.hypot(500 - e.pos.x, 100 - e.pos.y);
-    updateEnemies(s.enemies, s.player, s.walls, SIM_DT);
+    updateEnemies(s.enemies, s.players, s.walls, SIM_DT);
     const after = Math.hypot(500 - e.pos.x, 100 - e.pos.y);
     expect(after).toBeLessThan(before);
     expect(e.pos.x).toBeGreaterThan(100); // moved toward player on +x
@@ -33,7 +33,7 @@ describe('enemies', () => {
     const slow = spawnEnemy(s, 'shambler', { x: 100, y: 100 });
     const fast = spawnEnemy(s, 'runner', { x: 100, y: 300 });
     s.player.pos = { x: 900, y: 100 }; // keep both roughly same horizontal chase
-    for (let i = 0; i < 30; i++) updateEnemies(s.enemies, s.player, s.walls, SIM_DT);
+    for (let i = 0; i < 30; i++) updateEnemies(s.enemies, s.players, s.walls, SIM_DT);
     expect(fast.pos.x - 100).toBeGreaterThan(slow.pos.x - 100);
   });
 
@@ -43,7 +43,7 @@ describe('enemies', () => {
     const a = spawnEnemy(s, 'shambler', { x: 200, y: 200 });
     const b = spawnEnemy(s, 'shambler', { x: 203, y: 200 }); // almost on top of a
     const before = Math.hypot(a.pos.x - b.pos.x, a.pos.y - b.pos.y);
-    for (let i = 0; i < 10; i++) updateEnemies(s.enemies, s.player, s.walls, SIM_DT);
+    for (let i = 0; i < 10; i++) updateEnemies(s.enemies, s.players, s.walls, SIM_DT);
     const after = Math.hypot(a.pos.x - b.pos.x, a.pos.y - b.pos.y);
     expect(after).toBeGreaterThan(before);
   });
@@ -53,7 +53,7 @@ describe('enemies', () => {
     const s = createGameState([wall]);
     s.player.pos = { x: 400, y: 100 };
     const e = spawnEnemy(s, 'runner', { x: 100, y: 100 });
-    for (let i = 0; i < 60; i++) updateEnemies(s.enemies, s.player, s.walls, SIM_DT);
+    for (let i = 0; i < 60; i++) updateEnemies(s.enemies, s.players, s.walls, SIM_DT);
     expect(e.pos.x).toBeLessThanOrEqual(150 - ZOMBIES.runner.radius + 0.001); // never crossed the wall
   });
 
@@ -61,7 +61,7 @@ describe('enemies', () => {
     const s = createGameState([]);
     const e = spawnEnemy(s, 'shambler', { x: 100, y: 100 });
     e.hitFlash = 0.1;
-    updateEnemies(s.enemies, s.player, s.walls, SIM_DT);
+    updateEnemies(s.enemies, s.players, s.walls, SIM_DT);
     expect(e.hitFlash).toBeLessThan(0.1);
   });
 });

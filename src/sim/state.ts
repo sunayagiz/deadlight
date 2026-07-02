@@ -14,6 +14,10 @@ export function createPlayer(x: number, y: number): PlayerState {
     meleeSwing: 0,
     fireCooldown: 0,
     dash: { timeLeft: 0, cooldownLeft: 0, dirX: 1, dirY: 0 },
+    alive: true,
+    downed: false,
+    bleedout: 0,
+    reviveProgress: 0,
   };
 }
 
@@ -23,12 +27,19 @@ export function createGameState(
   doors: Door[] = [],
   playerStart: { x: number; y: number } = { x: 480, y: 270 },
   dims: { width: number; height: number } = { width: 960, height: 540 },
+  numPlayers = 1,
 ): GameState {
+  // fan the co-op squad out slightly around the start so they don't stack
+  const players = Array.from({ length: Math.max(1, numPlayers) }, (_, i) => {
+    const a = (i / 4) * Math.PI * 2;
+    return createPlayer(playerStart.x + Math.cos(a) * 26 * (i > 0 ? 1 : 0), playerStart.y + Math.sin(a) * 26 * (i > 0 ? 1 : 0));
+  });
   return {
     time: 0,
     mapW: dims.width,
     mapH: dims.height,
-    player: createPlayer(playerStart.x, playerStart.y),
+    players,
+    player: players[0],
     bullets: [],
     nextBulletId: 1,
     enemies: [],

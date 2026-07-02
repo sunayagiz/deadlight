@@ -8,6 +8,13 @@ export const PLAYER_MAX_HP = 100;
 
 export const BULLET_KNOCKBACK = 26; // px shove on a standard-radius enemy per hit
 
+// --- Co-op ---
+export const MAX_PLAYERS = 4;
+export const REVIVE_RADIUS = 56; // px: a standing teammate this close revives a downed one
+export const REVIVE_TIME = 2.4; // s of proximity to fully revive
+export const REVIVE_HP = 45; // hp restored on revive
+export const BLEEDOUT_TIME = 24; // s a downed player survives before dying
+
 export const DASH_SPEED = 640; // px/s
 export const DASH_DURATION = 0.15; // s
 export const DASH_COOLDOWN = 0.8; // s

@@ -135,10 +135,12 @@ let cacheKey = '';
 let cacheField: FlowField | null = null;
 
 export function getFlowField(state: GameState, solids: Wall[]): FlowField {
-  const p = state.player;
-  const key = `${Math.floor(p.pos.x / FLOW_CELL)},${Math.floor(p.pos.y / FLOW_CELL)}|${state.doors.map((d) => (d.open ? 1 : 0)).join('')}|${state.mapW}x${state.mapH}`;
+  // sources = every standing player; enemies flow toward whichever is nearest by path
+  const up = state.players.filter((p) => p.alive && !p.downed);
+  const sources = (up.length > 0 ? up : state.players).map((p) => p.pos);
+  const key = `${sources.map((s) => `${Math.floor(s.x / FLOW_CELL)},${Math.floor(s.y / FLOW_CELL)}`).join(';')}|${state.doors.map((d) => (d.open ? 1 : 0)).join('')}|${state.mapW}x${state.mapH}`;
   if (key !== cacheKey || !cacheField) {
-    cacheField = computeFlowField(state.mapW, state.mapH, solids, [p.pos]);
+    cacheField = computeFlowField(state.mapW, state.mapH, solids, sources);
     cacheKey = key;
   }
   return cacheField;
