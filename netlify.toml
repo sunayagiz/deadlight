@@ -1,0 +1,8 @@
+# Netlify build config (used when the repo is connected to Netlify).
+# For a manual deploy instead, just drag the built `dist/` folder to app.netlify.com/drop.
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
