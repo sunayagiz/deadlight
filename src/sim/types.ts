@@ -77,9 +77,8 @@ export interface BulletState {
 export interface LootState {
   id: number;
   pos: Vec2;
-  kind: 'weapon' | 'ammo';
-  weapon: WeaponId; // which weapon this grants, or which weapon's ammo
-  amount: number; // ammo count (ignored for weapon pickups)
+  kind: 'ammo' | 'health'; // zombies only drop ammo boxes and health packs
+  amount: number; // health: HP restored; ammo: unused (generic resupply)
   ttl: number; // seconds before it despawns
 }
 

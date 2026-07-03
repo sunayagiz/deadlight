@@ -70,7 +70,7 @@ const ASSETS = [
   'player', 'shambler', 'runner', 'brute', 'bloater', 'screamer', 'hound',
   'wpn_pistol', 'wpn_smg', 'wpn_shotgun', 'wpn_machinegun', 'wpn_minigun',
   'wpn_rpg', 'wpn_katana', 'wpn_bat', 'wpn_chainsaw', 'wpn_raygun',
-  'crate', 'ammo', 'muzzle', 'explosion', 'rocket', 'blood',
+  'crate', 'ammo', 'health', 'muzzle', 'explosion', 'rocket', 'blood',
   'floor', 'wall', 'door_closed', 'door_open',
   'light_glow', 'light_cone',
 ] as const;
@@ -1166,7 +1166,7 @@ export class GameScene extends Phaser.Scene {
         id: l.id,
         x: l.pos.x,
         y: l.pos.y,
-        texture: l.kind === 'weapon' ? `wpn_${l.weapon}` : 'ammo',
+        texture: l.kind === 'health' ? 'health' : 'ammo',
         height: 26,
         rotation: 0,
         visible: onScreen(l.pos.x, l.pos.y) && segmentClear(eye, l.pos, solids),

@@ -9,8 +9,7 @@ function place(s: ReturnType<typeof createGameState>, loot: Partial<LootState>):
   const l: LootState = {
     id: s.nextLootId++,
     pos: { x: 0, y: 0 },
-    kind: 'weapon',
-    weapon: 'shotgun',
+    kind: 'ammo',
     amount: 0,
     ttl: LOOT_TTL,
     ...loot,
@@ -31,31 +30,34 @@ describe('loot drops', () => {
 });
 
 describe('loot pickup', () => {
-  it('walking over a weapon adds it to the arsenal and auto-equips it', () => {
+  it('walking over a health pack heals (capped at max HP)', () => {
     const s = createGameState([]);
     s.player.pos = { x: 100, y: 100 };
-    place(s, { kind: 'weapon', weapon: 'shotgun', pos: { x: 100, y: 100 } });
+    s.player.hp = 20;
+    place(s, { kind: 'health', amount: 55, pos: { x: 100, y: 100 } });
     updateLoot(s, SIM_DT);
-    expect(s.player.owned).toContain('shotgun');
-    expect(s.player.weapon).toBe('shotgun');
+    expect(s.player.hp).toBe(75);
     expect(s.loot).toHaveLength(0);
   });
 
-  it('a limited weapon pickup grants starting ammo', () => {
+  it('never drops a weapon — only ammo and health', () => {
     const s = createGameState([]);
-    s.player.pos = { x: 100, y: 100 };
-    place(s, { kind: 'weapon', weapon: 'minigun', amount: 200, pos: { x: 100, y: 100 } });
-    updateLoot(s, SIM_DT);
-    expect(s.player.ammo.minigun).toBe(200);
+    const vals = [0, 0.09, 0, 0.29, 0, 0.49, 0, 0.69, 0, 0.89]; // (pass, pick) pairs across the table
+    let i = 0;
+    const rng = () => vals[i++ % vals.length];
+    for (let k = 0; k < 40; k++) dropLoot(s, { x: 0, y: 0 }, rng);
+    expect(s.loot.length).toBeGreaterThan(0);
+    expect(s.loot.every((l) => l.kind === 'ammo' || l.kind === 'health')).toBe(true);
   });
 
-  it('an ammo pickup adds to the reserve', () => {
+  it('an ammo pickup resupplies the owned limited weapons', () => {
     const s = createGameState([]);
     s.player.pos = { x: 100, y: 100 };
-    s.player.ammo.rpg = 1;
-    place(s, { kind: 'ammo', weapon: 'rpg', amount: 3, pos: { x: 100, y: 100 } });
+    s.player.owned.push('minigun');
+    s.player.ammo.minigun = 10;
+    place(s, { kind: 'ammo', pos: { x: 100, y: 100 } });
     updateLoot(s, SIM_DT);
-    expect(s.player.ammo.rpg).toBe(4);
+    expect(s.player.ammo.minigun).toBeGreaterThan(10);
   });
 
   it('does not pick up loot that is out of reach, and despawns it after ttl', () => {
