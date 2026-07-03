@@ -1,7 +1,38 @@
-import { ENEMY_SEPARATION_FORCE, ENEMY_SEPARATION_RADIUS } from '../config';
+import {
+  BOSS_HP_SCALE_FRAC,
+  ENEMY_HP_EXP,
+  ENEMY_HP_EXP_WAVE,
+  ENEMY_HP_LINEAR,
+  ENEMY_SEPARATION_FORCE,
+  ENEMY_SEPARATION_RADIUS,
+  ENEMY_SPEED_PER_WAVE,
+  ENEMY_SPEED_SCALE_MAX,
+  MAX_ALIVE_BASE,
+  MAX_ALIVE_PER_PLAYER,
+} from '../config';
 import { sampleFlow, type FlowField } from './flowfield';
 import { norm } from './vec';
 import type { EnemyState, EnemyType, GameState, PlayerState, SpawnZone, Wall } from './types';
+
+/**
+ * COD-style HP ramp: linear through wave ENEMY_HP_EXP_WAVE, then compounding
+ * (×ENEMY_HP_EXP each wave after). Wave 1 = ×1 so early waves are unchanged.
+ */
+export function enemyHpScale(wave: number): number {
+  const w = Math.max(1, wave);
+  const linear = 1 + ENEMY_HP_LINEAR * (Math.min(w, ENEMY_HP_EXP_WAVE) - 1);
+  return w <= ENEMY_HP_EXP_WAVE ? linear : linear * ENEMY_HP_EXP ** (w - ENEMY_HP_EXP_WAVE);
+}
+
+/** Zombies speed up each wave (walkers → sprinters), capped so they stay kite-able. */
+export function enemySpeedScale(wave: number): number {
+  return Math.min(ENEMY_SPEED_SCALE_MAX, 1 + ENEMY_SPEED_PER_WAVE * (Math.max(1, wave) - 1));
+}
+
+/** COD max-on-screen cap: keeps the horde a relentless advancing stream, not a lag-bomb. */
+export function maxAlive(players: number): number {
+  return MAX_ALIVE_BASE + MAX_ALIVE_PER_PLAYER * Math.max(0, players - 1);
+}
 
 export interface EnemyDef {
   type: EnemyType;
@@ -29,12 +60,15 @@ export function isBoss(type: EnemyType): boolean {
 
 export function spawnEnemy(state: GameState, type: EnemyType, zone: SpawnZone): EnemyState {
   const def = ZOMBIES[type];
+  // per-wave HP ramp; bosses (already huge) take a softer fraction of it
+  const ramp = enemyHpScale(state.wave.index);
+  const scale = def.boss ? 1 + (ramp - 1) * BOSS_HP_SCALE_FRAC : ramp;
   const e: EnemyState = {
     id: state.nextEnemyId++,
     type,
     pos: { x: zone.x, y: zone.y },
     vel: { x: 0, y: 0 },
-    hp: def.hp,
+    hp: Math.round(def.hp * scale),
     hitFlash: 0,
     ...(def.boss ? { boss: { attackCd: 1.5, telegraph: 0, pending: null } } : {}),
   };
@@ -72,6 +106,7 @@ export function updateEnemies(
   walls: Wall[],
   dt: number,
   flow?: FlowField,
+  speedScale = 1, // per-wave speed ramp (defaults to 1 for tests/solo callers)
 ): void {
   const targets = players.filter((p) => p.alive && !p.downed);
   const pool = targets.length > 0 ? targets : players;
@@ -90,11 +125,12 @@ export function updateEnemies(
       (flow && sampleFlow(flow, e.pos.x, e.pos.y)) ??
       norm({ x: tp.pos.x - e.pos.x, y: tp.pos.y - e.pos.y });
     const sep = separation(e, enemies);
+    const spd = def.speed * speedScale; // per-wave ramp (COD: walkers → sprinters)
     const desired = norm({
-      x: seek.x * def.speed + sep.x * ENEMY_SEPARATION_FORCE,
-      y: seek.y * def.speed + sep.y * ENEMY_SEPARATION_FORCE,
+      x: seek.x * spd + sep.x * ENEMY_SEPARATION_FORCE,
+      y: seek.y * spd + sep.y * ENEMY_SEPARATION_FORCE,
     });
-    e.vel = { x: desired.x * def.speed, y: desired.y * def.speed };
+    e.vel = { x: desired.x * spd, y: desired.y * spd };
 
     // Per-axis AABB wall collision (same model as the player).
     let nx = e.pos.x + e.vel.x * dt;

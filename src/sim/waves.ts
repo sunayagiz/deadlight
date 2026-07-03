@@ -13,7 +13,7 @@ import {
   WAVE_INTERMISSION,
   WAVE_SPAWN_INTERVAL,
 } from '../config';
-import { ZOMBIES, spawnEnemy } from './enemies';
+import { ZOMBIES, maxAlive, spawnEnemy } from './enemies';
 import { mapSolids } from './map';
 import { rollDraft } from './perks';
 import { segmentClear } from './vision';
@@ -134,8 +134,12 @@ export function updateWaves(state: GameState, dt: number, rng: Rng = Math.random
 
   // active phase: drain the spawn queue on an interval; if every zone is
   // watched or locked, HOLD the spawn and retry — budget is never skipped.
+  // COD max-on-screen cap: once the horde is at capacity, HOLD until kills free
+  // a slot, so a big wave becomes a relentless advancing stream, not a lag-bomb.
+  const squad = Math.max(1, state.players.filter((p) => p.alive).length);
+  const atCap = state.enemies.length >= maxAlive(squad);
   wave.spawnCooldown -= dt;
-  if (wave.spawnQueue.length > 0 && wave.spawnCooldown <= 0) {
+  if (wave.spawnQueue.length > 0 && wave.spawnCooldown <= 0 && !atCap) {
     const zone = pickZone(state, rng);
     if (zone) {
       const type = wave.spawnQueue.shift()!;

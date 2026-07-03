@@ -55,6 +55,19 @@ export const SPAWN_RETRY = 0.2; // s before retrying when no valid zone exists
 // --- Flow field pathfinding ---
 export const FLOW_CELL = 40; // px grid cell for the zombie flow field
 
+// --- COD-Zombies-style per-wave scaling ---
+// Zombies never idle — the flow field already routes every one to the nearest
+// player — so difficulty rides on HP (the signature bullet-sponge ramp), speed,
+// and a max-alive cap that turns big waves into a relentless advancing stream.
+export const ENEMY_HP_LINEAR = 0.18; // +18% of base HP per wave through the linear phase
+export const ENEMY_HP_EXP_WAVE = 9; // HP compounds after this wave (COD: round 10+)
+export const ENEMY_HP_EXP = 1.1; // ×1.1 per wave past the threshold — exponential
+export const BOSS_HP_SCALE_FRAC = 0.5; // bosses take half the per-wave HP ramp (already tanky)
+export const ENEMY_SPEED_PER_WAVE = 0.035; // +3.5% move speed per wave (walkers → sprinters)
+export const ENEMY_SPEED_SCALE_MAX = 1.6; // speed cap so they stay catchable/kite-able
+export const MAX_ALIVE_BASE = 30; // concurrent enemy cap, solo (relentless stream, no lag-bomb)
+export const MAX_ALIVE_PER_PLAYER = 8; // +this many to the cap per extra player
+
 // --- Run goal / extraction (win condition) ---
 export const EXTRACTION_WAVE = 20; // the final wave: reach + hold the exit to escape
 export const EXTRACT_HOLD = 14; // s a standing player must hold the extraction point

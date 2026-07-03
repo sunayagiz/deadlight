@@ -1,7 +1,7 @@
 import { updateBosses } from './bosses';
 import { updateCombat } from './combat';
 import { updateRevives } from './coop';
-import { updateEnemies } from './enemies';
+import { enemySpeedScale, updateEnemies } from './enemies';
 import { updateExtraction } from './extraction';
 import { getFlowField } from './flowfield';
 import { updateLoot } from './loot';
@@ -61,7 +61,7 @@ export function stepSim(
   });
 
   updateRevives(state, list, dt); // bleedout + teammate revives
-  updateEnemies(state.enemies, state.players, solids, dt, flow);
+  updateEnemies(state.enemies, state.players, solids, dt, flow, enemySpeedScale(state.wave.index));
   updateBosses(state, dt, rng);
   updateBullets(state, dt);
   updateCombat(state, dt, rng);
