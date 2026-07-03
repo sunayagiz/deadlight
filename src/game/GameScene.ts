@@ -1,6 +1,9 @@
 import Phaser from 'phaser';
 import {
   AMBIENT_RADIUS,
+  EXTRACT_HOLD,
+  EXTRACT_RADIUS,
+  EXTRACTION_WAVE,
   FLASHLIGHT_HALF_ANGLE,
   FLASHLIGHT_RANGE,
   PLAYER_MAX_HP,
@@ -9,6 +12,8 @@ import {
 } from '../config';
 import { ZOMBIES, spawnEnemy } from '../sim/enemies';
 import { buildMap, mapSolids } from '../sim/map';
+import { PERKS, effectiveMaxHp, type PerkId } from '../sim/perks';
+import { SHOP } from '../sim/shop';
 import { createGameState } from '../sim/state';
 import { stepSim } from '../sim/step';
 import { lerp } from '../sim/vec';
@@ -17,6 +22,9 @@ import { updateAim } from '../sim/weapons';
 import { updateDash, updateMovement } from '../sim/movement';
 import { WEAPONS } from '../sim/weapons';
 import { isUp, type EnemyType, type GameState, type PlayerInput, type PlayerState } from '../sim/types';
+
+/** Static base for runtime asset URLs so the build works under any deploy path. */
+const ASSET_BASE = import.meta.env.BASE_URL;
 import type { GuestNet, HostNet } from '../net/net';
 import { applySnapshot, snapshot } from '../net/protocol';
 import { getSession } from '../net/session';
@@ -150,6 +158,26 @@ export class GameScene extends Phaser.Scene {
   private bossBarFill!: Phaser.GameObjects.Rectangle;
   private bossLabel!: Phaser.GameObjects.Text;
   private overlay?: Phaser.GameObjects.Text;
+  private cashHud!: Phaser.GameObjects.Text;
+  // guest render smoothing (entity interpolation) — targets updated per snapshot,
+  // render positions eased toward them so 30 Hz snapshots look like 60 fps motion.
+  private smoothEnemy = new Map<number, { x: number; y: number }>();
+  private smoothRemote = new Map<number, { x: number; y: number }>();
+  // reusable circle pool (bullet tracers + blood particles) — kills GC churn.
+  private circlePool: Phaser.GameObjects.Arc[] = [];
+  // between-wave shop (Phaser-native, host-authoritative buys via InputCollector)
+  private shopRoot!: Phaser.GameObjects.Container;
+  private shopButtons: { bg: Phaser.GameObjects.Rectangle; label: Phaser.GameObjects.Text; item: number }[] = [];
+  // perk draft overlay
+  private draftRoot!: Phaser.GameObjects.Container;
+  private draftCards: { bg: Phaser.GameObjects.Rectangle; title: Phaser.GameObjects.Text; body: Phaser.GameObjects.Text }[] = [];
+  private pointerOverUI = false; // true while the cursor is over a shop/draft button (suppress fire)
+  // extraction beacon (world-space) + on-screen escape bar
+  private extractBeacon!: Phaser.GameObjects.Arc;
+  private extractArrow!: Phaser.GameObjects.Triangle;
+  private extractBarBack!: Phaser.GameObjects.Rectangle;
+  private extractBarFill!: Phaser.GameObjects.Rectangle;
+  private extractLabel!: Phaser.GameObjects.Text;
 
   constructor() {
     super('game');
@@ -158,13 +186,13 @@ export class GameScene extends Phaser.Scene {
   preload(): void {
     // Only images block first render; audio is loaded in the background after
     // create() so a slow/stalled audio decode can never keep the game black.
-    for (const key of ASSETS) this.load.image(key, `/assets/${key}.png`);
+    for (const key of ASSETS) this.load.image(key, `${ASSET_BASE}assets/${key}.png`);
   }
 
   /** Load all sound assets in the background; play the music bed once ready. */
   private loadAudioDeferred(): void {
-    for (const key of SOUNDS) this.load.audio(key, `/assets/audio/${key}.wav`);
-    this.load.audio('music', '/assets/audio/music.wav');
+    for (const key of SOUNDS) this.load.audio(key, `${ASSET_BASE}assets/audio/${key}.wav`);
+    this.load.audio('music', `${ASSET_BASE}assets/audio/music.wav`);
     const startMusic = () => {
       if (this.sound.locked || !this.cache.audio.exists('music') || this.sound.get('music')) return;
       this.sound.play('music', { loop: true, volume: 0.35 });
@@ -197,6 +225,7 @@ export class GameScene extends Phaser.Scene {
       map.playerStart,
       { width: map.width, height: map.height },
       numPlayers,
+      map.extractionPoint,
     );
     if (session.role === 'guest') this.state.players.forEach((p, i) => (p.alive = i === this.localIndex));
 
@@ -226,6 +255,16 @@ export class GameScene extends Phaser.Scene {
       );
       this.state.wave.timer = 9999; // hold the wave so the lineup stays put
     }
+    // ?ext jumps to the final escape wave next to the exit; ?cash/?perk seed the shop/draft.
+    if (qs.has('ext')) {
+      this.state.wave.index = EXTRACTION_WAVE;
+      this.state.wave.timer = 0.5;
+      this.state.doors.forEach((d) => (d.open = true));
+      this.state.player.pos = { x: map.extractionPoint.x - 260, y: map.extractionPoint.y };
+    }
+    const debugCash = Number(qs.get('cash'));
+    if (debugCash > 0) this.state.cash = debugCash;
+    if (qs.has('perk')) this.state.perkDraft = ['damage', 'firerate', 'vigor'];
 
     this.mapW = map.width;
     this.mapH = map.height;
@@ -300,6 +339,10 @@ export class GameScene extends Phaser.Scene {
       .text(58, 492, '', { fontFamily: 'monospace', fontSize: '14px', color: '#f2c14e' })
       .setScrollFactor(0)
       .setDepth(DEPTH_HUD);
+    this.cashHud = this.add
+      .text(16, 470, '', { fontFamily: 'monospace', fontSize: '15px', color: '#7dffa0', fontStyle: 'bold' })
+      .setScrollFactor(0)
+      .setDepth(DEPTH_HUD);
 
     this.bossBarBack = this.add.rectangle(480, 26, 380, 12, COLORS.bossBarBack).setScrollFactor(0).setDepth(DEPTH_HUD).setVisible(false);
     this.bossBarFill = this.add
@@ -329,13 +372,111 @@ export class GameScene extends Phaser.Scene {
     this.explored.clear(); // fresh fog on (re)start
     this.minimapDirty = true;
 
+    // Extraction beacon (world space) + off-screen arrow + on-screen escape bar.
+    // Placed below the boss bar (the final wave is also a boss wave) so the two never collide.
+    this.extractBeacon = this.add.circle(0, 0, EXTRACT_RADIUS, 0x2effa0, 0.08).setStrokeStyle(3, 0x38ffb0, 0.8).setDepth(DEPTH_FLOOR + 0.6).setVisible(false);
+    this.extractArrow = this.add.triangle(480, 118, 0, 16, 22, 16, 11, 0, 0x38ffb0, 0.9).setScrollFactor(0).setDepth(DEPTH_HUD).setVisible(false);
+    this.extractBarBack = this.add.rectangle(480, 96, 360, 14, 0x0c221a).setScrollFactor(0).setDepth(DEPTH_HUD).setVisible(false);
+    this.extractBarFill = this.add.rectangle(480 - 180, 96, 360, 14, 0x38ffb0).setOrigin(0, 0.5).setScrollFactor(0).setDepth(DEPTH_HUD).setVisible(false);
+    this.extractLabel = this.add.text(480, 74, '', { fontFamily: 'monospace', fontSize: '14px', color: '#8affbf', fontStyle: 'bold' }).setOrigin(0.5).setScrollFactor(0).setDepth(DEPTH_HUD).setVisible(false);
+
+    this.buildShopUI();
+    this.buildDraftUI();
+
     // All sound (SFX + music) loads in the background now that the scene is up.
     this.loadAudioDeferred();
+    // Robust autoplay unlock: the first click/key resumes a suspended AudioContext
+    // (some browsers hold it suspended even after the lobby gesture).
+    const unlock = (): void => {
+      const anySound = this.sound as unknown as { context?: AudioContext; unlock?: () => void };
+      if (this.sound.locked && anySound.unlock) anySound.unlock();
+      if (anySound.context && anySound.context.state === 'suspended') void anySound.context.resume();
+    };
+    this.input.once('pointerdown', unlock);
+    this.input.keyboard!.once('keydown', unlock);
 
     // R restarts after death.
     this.input.keyboard!.on('keydown-R', () => {
       if (this.state.gameOver) this.scene.restart();
     });
+  }
+
+  // ── circle pool (bullets + blood particles) ────────────────────────────────
+  private getCircle(x: number, y: number, r: number, color: number, alpha: number, depth: number): Phaser.GameObjects.Arc {
+    const c = this.circlePool.pop() ?? this.add.circle(0, 0, 1, 0xffffff);
+    // reset object alpha (a prior tween may have faded it) — translucency comes from fillStyle
+    c.setPosition(x, y).setRadius(r).setFillStyle(color, alpha).setAlpha(1).setDepth(depth).setScale(1).setActive(true).setVisible(true);
+    return c;
+  }
+  private freeCircle(c: Phaser.GameObjects.Arc): void {
+    c.setVisible(false).setActive(false);
+    if (this.circlePool.length < 256) this.circlePool.push(c);
+    else c.destroy();
+  }
+
+  /**
+   * Guest render smoothing: ease a stored position toward the latest snapshot
+   * target so 30 Hz authoritative updates look like 60 fps motion. Big jumps
+   * (spawns/teleports) snap instantly so nothing slides across the map.
+   */
+  private smooth(map: Map<number, { x: number; y: number }>, id: number, tx: number, ty: number, dt: number): { x: number; y: number } {
+    let s = map.get(id);
+    if (!s || (tx - s.x) ** 2 + (ty - s.y) ** 2 > 260 * 260) {
+      s = { x: tx, y: ty };
+      map.set(id, s);
+      return s;
+    }
+    const k = 1 - Math.exp(-dt / 0.05); // ~100 ms settle; kills the 30 Hz stutter
+    s.x += (tx - s.x) * k;
+    s.y += (ty - s.y) * k;
+    return s;
+  }
+
+  // ── between-wave shop (interactive HUD) ─────────────────────────────────────
+  private buildShopUI(): void {
+    const w = 300;
+    const rowH = 30;
+    const x0 = 480 - w / 2;
+    const y0 = 300;
+    this.shopRoot = this.add.container(0, 0).setScrollFactor(0).setDepth(DEPTH_HUD + 2).setVisible(false);
+    const panel = this.add.rectangle(480, y0 + (SHOP.length * rowH) / 2 + 6, w + 20, SHOP.length * rowH + 52, 0x06100b, 0.92).setStrokeStyle(1, 0x2b4a34);
+    const title = this.add.text(480, y0 - 30, 'SHOP  ·  between waves', { fontFamily: 'monospace', fontSize: '14px', color: '#8fef9f' }).setOrigin(0.5);
+    this.shopRoot.add([panel, title]);
+    SHOP.forEach((item, i) => {
+      const y = y0 + i * rowH;
+      const bg = this.add.rectangle(480, y, w, rowH - 4, 0x101a12).setStrokeStyle(1, 0x233).setInteractive({ useHandCursor: true });
+      const label = this.add.text(x0 + 8, y - 7, '', { fontFamily: 'monospace', fontSize: '13px', color: '#cfe8d4' });
+      bg.on('pointerover', () => { bg.setFillStyle(0x16261a); this.pointerOverUI = true; });
+      bg.on('pointerout', () => { bg.setFillStyle(0x101a12); this.pointerOverUI = false; });
+      bg.on('pointerdown', () => this.inputCollector.requestBuy(i));
+      this.shopRoot.add([bg, label]);
+      this.shopButtons.push({ bg, label, item: i });
+    });
+    const hint = this.add.text(480, y0 + SHOP.length * rowH + 6, 'click to buy', { fontFamily: 'monospace', fontSize: '11px', color: '#4d6b55' }).setOrigin(0.5);
+    this.shopRoot.add(hint);
+  }
+
+  // ── perk draft overlay ──────────────────────────────────────────────────────
+  private buildDraftUI(): void {
+    this.draftRoot = this.add.container(0, 0).setScrollFactor(0).setDepth(DEPTH_HUD + 3).setVisible(false);
+    const dim = this.add.rectangle(480, 270, 960, 540, 0x02040a, 0.62);
+    const title = this.add.text(480, 150, 'CHOOSE A PERK', { fontFamily: 'monospace', fontSize: '26px', color: '#ffd45e', fontStyle: 'bold' }).setOrigin(0.5);
+    this.draftRoot.add([dim, title]);
+    const cw = 220;
+    const gap = 24;
+    const total = 3 * cw + 2 * gap;
+    const startX = 480 - total / 2;
+    for (let i = 0; i < 3; i++) {
+      const cx = startX + i * (cw + gap) + cw / 2;
+      const bg = this.add.rectangle(cx, 300, cw, 170, 0x0c140f, 0.98).setStrokeStyle(2, 0x3ea45a).setInteractive({ useHandCursor: true });
+      const t = this.add.text(cx, 250, '', { fontFamily: 'monospace', fontSize: '17px', color: '#cfe8d4', fontStyle: 'bold', align: 'center', wordWrap: { width: cw - 20 } }).setOrigin(0.5);
+      const b = this.add.text(cx, 320, '', { fontFamily: 'monospace', fontSize: '13px', color: '#8fef9f', align: 'center', wordWrap: { width: cw - 24 } }).setOrigin(0.5);
+      bg.on('pointerover', () => { bg.setFillStyle(0x152016); this.pointerOverUI = true; });
+      bg.on('pointerout', () => { bg.setFillStyle(0x0c140f); this.pointerOverUI = false; });
+      bg.on('pointerdown', () => this.inputCollector.requestPerk(i));
+      this.draftRoot.add([bg, t, b]);
+      this.draftCards.push({ bg, title: t, body: b });
+    }
   }
 
   /** The player this client controls (host/solo = 0, guest = its slot). */
@@ -382,6 +523,11 @@ export class GameScene extends Phaser.Scene {
   update(_time: number, deltaMs: number): void {
     const dt = deltaMs / 1000;
     const input = this.inputCollector.sample();
+    // don't fire the weapon when clicking a shop button or picking a perk
+    if (this.pointerOverUI || this.state.perkDraft) {
+      input.fire = false;
+      input.dash = false;
+    }
     const lp = this.local();
     this.prevPlayerPos = { x: lp.pos.x, y: lp.pos.y };
     this.prevLocalFireCd = lp.fireCooldown;
@@ -514,14 +660,14 @@ export class GameScene extends Phaser.Scene {
         for (let i = 0; i < 6; i++) {
           const a = dir + (Math.random() - 0.5) * 2.4;
           const dist = 20 + Math.random() * 44;
-          const drop = this.add.circle(e.pos.x, e.pos.y, 1.6 + Math.random() * 2.4, 0x8a1414, 0.92).setDepth(1);
+          const drop = this.getCircle(e.pos.x, e.pos.y, 1.6 + Math.random() * 2.4, 0x8a1414, 0.92, 1);
           this.tweens.add({
             targets: drop,
             x: e.pos.x + Math.cos(a) * dist,
             y: e.pos.y + Math.sin(a) * dist,
             alpha: 0,
             duration: 220 + Math.random() * 160,
-            onComplete: () => drop.destroy(),
+            onComplete: () => this.freeCircle(drop), // recycle
           });
         }
         // a lingering droplet stains the floor
@@ -649,8 +795,12 @@ export class GameScene extends Phaser.Scene {
     const lx = this.role === 'guest' ? renderLocal.pos.x : lerp(this.prevPlayerPos.x, lp.pos.x, alpha);
     const ly = this.role === 'guest' ? renderLocal.pos.y : lerp(this.prevPlayerPos.y, lp.pos.y, alpha);
     this.camTarget.setPosition(lx, ly);
-    const posOf = (i: number, pl: PlayerState) =>
-      i === this.localIndex ? { x: lx, y: ly } : { x: pl.pos.x, y: pl.pos.y };
+    const posOf = (i: number, pl: PlayerState) => {
+      if (i === this.localIndex) return { x: lx, y: ly };
+      // guests interpolate teammates between snapshots; host/solo are already 60 fps
+      if (this.role === 'guest') return this.smooth(this.smoothRemote, i, pl.pos.x, pl.pos.y, dt);
+      return { x: pl.pos.x, y: pl.pos.y };
+    };
     // for the local slot, aim/weapon come from the prediction so they're instant
     const srcOf = (i: number, pl: PlayerState) => (i === this.localIndex ? renderLocal : pl);
 
@@ -804,19 +954,27 @@ export class GameScene extends Phaser.Scene {
     );
 
     // Enemies: sprite per type, facing their motion with a walk sway, hidden without line of sight.
+    const guest = this.role === 'guest';
+    if (guest) {
+      const live = new Set(this.state.enemies.map((e) => e.id));
+      for (const id of this.smoothEnemy.keys()) if (!live.has(id)) this.smoothEnemy.delete(id);
+    }
     this.syncSprites(
       this.enemySprites,
-      this.state.enemies.map((e) => ({
+      this.state.enemies.map((e) => {
+        const sp = guest ? this.smooth(this.smoothEnemy, e.id, e.pos.x, e.pos.y, dt) : e.pos;
+        return {
         id: e.id,
-        x: e.pos.x,
-        y: e.pos.y,
+        x: sp.x,
+        y: sp.y,
         texture: e.type,
         height: ZOMBIES[e.type].radius * 4.7,
         rotation: (e.vel.x || e.vel.y) ? Math.atan2(e.vel.y, e.vel.x) - ART_FACING : 0,
         visible: onScreen(e.pos.x, e.pos.y) && segmentClear(eye, e.pos, solids),
         tintFill: e.boss && e.boss.telegraph > 0 ? COLORS.telegraphTint : e.hitFlash > 0 ? 0xffffff : undefined,
         wobble: e.boss ? 0.05 : 0.11, // shamble sway; heavier bodies sway less
-      })),
+        };
+      }),
       (lastX, lastY, id, img) => {
         this.spawnGore(lastX, lastY); // pool + flying flesh/bone gibs
         // corpse: the sprite stays behind, blood-darkened, and slowly soaks away
@@ -872,20 +1030,86 @@ export class GameScene extends Phaser.Scene {
       this.bossLabel.setVisible(false);
     }
 
+    this.cashHud.setText(`$ ${this.state.cash}`);
+    this.updateShopUI();
+    this.updateDraftUI();
+    this.updateExtractionHud(dt);
+
     if (this.state.gameOver && !this.overlay) {
+      const won = this.state.won;
       this.overlay = this.add
-        .text(480, 270, 'YOU DIED\n\n[R] restart', {
+        .text(480, 270, won ? 'YOU ESCAPED\n\n[R] play again' : 'YOU DIED\n\n[R] restart', {
           fontFamily: 'monospace',
           fontSize: '48px',
-          color: '#c23b3b',
+          color: won ? '#7dffa0' : '#c23b3b',
           align: 'center',
         })
         .setOrigin(0.5)
         .setScrollFactor(0)
         .setDepth(DEPTH_HUD);
+      if (won) this.banner('EXTRACTION COMPLETE', '#7dffa0');
     }
 
     this.drawMinimap();
+  }
+
+  /** Show/refresh the between-wave shop (intermission only, not during a draft). */
+  private updateShopUI(): void {
+    const open = this.state.wave.phase === 'intermission' && !this.state.perkDraft && !this.state.gameOver;
+    this.shopRoot.setVisible(open);
+    if (!open) return;
+    for (const b of this.shopButtons) {
+      const item = SHOP[b.item];
+      const afford = this.state.cash >= item.cost;
+      b.label.setText(`${item.name}`.padEnd(20) + `$${item.cost}`);
+      b.label.setColor(afford ? '#cfe8d4' : '#5a6b60');
+      b.bg.setAlpha(afford ? 1 : 0.5);
+    }
+  }
+
+  /** Show/refresh the perk-draft cards while a draft is pending. */
+  private updateDraftUI(): void {
+    const draft = this.state.perkDraft;
+    const open = !!draft && !this.state.gameOver;
+    this.draftRoot.setVisible(open);
+    if (!open || !draft) return;
+    this.draftCards.forEach((card, i) => {
+      const id = draft[i] as PerkId | undefined;
+      const shown = !!id;
+      card.bg.setVisible(shown);
+      card.title.setVisible(shown).setText(id ? PERKS[id].name : '');
+      const lvl = id ? this.state.perks[id] ?? 0 : 0;
+      card.body.setVisible(shown).setText(id ? `${PERKS[id].desc}\n\n${lvl > 0 ? `owned ×${lvl}` : 'new'}` : '');
+    });
+  }
+
+  /** Final-wave escape objective: world beacon, off-screen arrow, and hold bar. */
+  private updateExtractionHud(dt: number): void {
+    const ex = this.state.extraction;
+    const on = !!ex && !this.state.gameOver;
+    this.extractBeacon.setVisible(on);
+    this.extractArrow.setVisible(on);
+    this.extractBarBack.setVisible(on);
+    this.extractBarFill.setVisible(on);
+    this.extractLabel.setVisible(on);
+    if (!ex) return;
+    const pulse = 0.06 + 0.06 * (0.5 + 0.5 * Math.sin(this.state.time * 4));
+    this.extractBeacon.setPosition(ex.x, ex.y).setFillStyle(0x2effa0, pulse).setStrokeStyle(3, 0x38ffb0, 0.85);
+    const frac = ex.progress / EXTRACT_HOLD;
+    this.extractBarFill.width = 360 * Math.max(0, Math.min(1, frac));
+    // arrow points from screen center toward the exit (hidden when it's on screen)
+    const cam = this.cameras.main;
+    const onScreen = cam.worldView.contains(ex.x, ex.y);
+    this.extractArrow.setVisible(on && !onScreen);
+    if (!onScreen) {
+      const lp = this.local();
+      const ang = Math.atan2(ex.y - lp.pos.y, ex.x - lp.pos.x);
+      this.extractArrow.setPosition(480 + Math.cos(ang) * 150, 118 + Math.sin(ang) * 26).setRotation(ang + Math.PI / 2);
+    }
+    this.extractLabel.setText(
+      frac >= 1 ? 'ESCAPING…' : onScreen ? `HOLD THE EXIT  ${Math.floor(frac * 100)}%` : 'REACH THE EXIT — follow the arrow',
+    );
+    void dt;
   }
 
   /** Scale an image to a display height, preserving the source aspect ratio. */
@@ -914,7 +1138,7 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  /** Diffing renderer for circles (bullet tracers). */
+  /** Diffing renderer for circles (bullet tracers) — draws from the shared pool. */
   private syncCircles(
     pool: Map<number, Phaser.GameObjects.Arc>,
     items: { id: number; x: number; y: number; r: number; color: number }[],
@@ -924,14 +1148,14 @@ export class GameScene extends Phaser.Scene {
       seen.add(it.id);
       let shape = pool.get(it.id);
       if (!shape) {
-        shape = this.add.circle(it.x, it.y, it.r, it.color);
+        shape = this.getCircle(it.x, it.y, it.r, it.color, 1, 0);
         pool.set(it.id, shape);
       }
       shape.setPosition(it.x, it.y).setFillStyle(it.color);
     }
     for (const [id, shape] of pool) {
       if (!seen.has(id)) {
-        shape.destroy();
+        this.freeCircle(shape); // recycle instead of destroy
         pool.delete(id);
       }
     }
