@@ -8,6 +8,7 @@ export interface MapDef {
   doors: Door[];
   spawnZones: SpawnZone[];
   playerStart: { x: number; y: number };
+  extractionPoint: { x: number; y: number }; // the escape exit (final wave win point)
 }
 
 // ── Carving engine ───────────────────────────────────────────────────────────
@@ -156,6 +157,8 @@ export function buildMap(): MapDef {
       { x: px(98) + 30, y: px(10) + 30, minWave: 6 },
     ],
     playerStart: { x: px(72) + 30, y: px(32) + 30 },
+    // deep in the generator room (SE), reachable via the sewer — the run's exit
+    extractionPoint: { x: px(130) + 30, y: px(57) + 30 },
   };
 }
 

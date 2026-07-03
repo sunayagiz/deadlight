@@ -1,3 +1,4 @@
+import { damageMult, fireRateMult } from './perks';
 import type { GameState, PlayerInput, PlayerState, WeaponId, WeaponKind } from './types';
 
 export interface WeaponDef {
@@ -82,6 +83,8 @@ export function updateFiring(
   if (!input.fire || p.fireCooldown > 0 || !hasAmmo(p, def)) return;
 
   const rateScale = def.id === 'minigun' ? 0.2 + 0.8 * p.spin : 1;
+  const dmg = def.damage * damageMult(state); // perk-scaled
+  const owner = state.players.indexOf(p); // life-steal credit / friendly-fire attribution
   const pellets = def.pellets ?? 1;
   const spread = def.spread ?? 0;
   for (let i = 0; i < pellets; i++) {
@@ -92,14 +95,15 @@ export function updateFiring(
       pos: { x: p.pos.x, y: p.pos.y },
       vel: { x: Math.cos(a) * def.bulletSpeed!, y: Math.sin(a) * def.bulletSpeed! },
       ttl: def.bulletTtl!,
-      damage: def.damage,
+      damage: dmg,
       splashRadius: def.splashRadius ?? 0,
-      splashDamage: def.splashDamage ?? 0,
+      splashDamage: (def.splashDamage ?? 0) * damageMult(state),
       hostile: false,
+      owner,
     });
   }
   if (def.startAmmo !== undefined) p.ammo[def.id] = (p.ammo[def.id] ?? 0) - 1;
-  p.fireCooldown = 1 / (def.fireRate * rateScale);
+  p.fireCooldown = 1 / (def.fireRate * rateScale * fireRateMult(state));
 }
 
 /** Integrate bullet motion and age them. Removal + explosions happen in combat. */

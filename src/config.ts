@@ -54,3 +54,17 @@ export const SPAWN_RETRY = 0.2; // s before retrying when no valid zone exists
 
 // --- Flow field pathfinding ---
 export const FLOW_CELL = 40; // px grid cell for the zombie flow field
+
+// --- Run goal / extraction (win condition) ---
+export const EXTRACTION_WAVE = 20; // the final wave: reach + hold the exit to escape
+export const EXTRACT_HOLD = 14; // s a standing player must hold the extraction point
+export const EXTRACT_RADIUS = 110; // px radius of the extraction zone
+
+// --- Economy (between-wave shop) ---
+export const CASH_PER_KILL = 7; // base cash per kill, scaled by the enemy's budget cost
+export const CASH_BOSS = 240; // flat bounty for downing a boss
+
+// --- Perks (in-run roguelite drafting) ---
+export const PERK_INTERVAL = 3; // offer a perk draft after every Nth wave cleared
+export const PERK_MAX_LEVEL = 5; // stack cap per perk
+export const PERK_CHOICES = 3; // options shown per draft

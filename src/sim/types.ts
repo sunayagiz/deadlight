@@ -14,6 +14,8 @@ export interface PlayerInput {
   sprint: boolean;
   weaponSlot: number; // equip owned[slot] this tick; -1 = no change
   weaponCycle: number; // cycle owned weapons: -1 prev, +1 next, 0 none
+  buy: number; // shop purchase index this tick (intermission only); -1 = none
+  perk: number; // perk-draft choice this tick (0..PERK_CHOICES-1); -1 = none
 }
 
 export type WeaponId =
@@ -67,6 +69,7 @@ export interface BulletState {
   splashRadius: number; // 0 = non-explosive
   splashDamage: number;
   hostile: boolean; // true = enemy projectile that damages the player
+  owner: number; // firing player's slot (-1 = enemy/hostile); used for life-steal credit
 }
 
 export interface LootState {
@@ -123,6 +126,13 @@ export interface SpawnZone {
   minWave?: number; // zone activates at this wave (rooms behind gates)
 }
 
+/** The final-wave escape objective: reach the exit and hold it to win the run. */
+export interface ExtractionState {
+  x: number;
+  y: number;
+  progress: number; // seconds held so far (0..EXTRACT_HOLD)
+}
+
 export type WavePhase = 'intermission' | 'active';
 
 export interface WaveState {
@@ -152,4 +162,10 @@ export interface GameState {
   walls: Wall[];
   doors: Door[];
   gameOver: boolean;
+  won: boolean; // true = the squad escaped (extraction complete)
+  cash: number; // shared squad currency, spent in the between-wave shop
+  perks: Record<string, number>; // shared squad perk levels (perk id → stacks)
+  perkDraft: string[] | null; // 3 perk ids offered right now, or null when no draft is pending
+  extractPoint: { x: number; y: number }; // static exit location (from the map; off-wire)
+  extraction: ExtractionState | null; // live escape progress once the final wave begins
 }

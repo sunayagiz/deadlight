@@ -1,8 +1,10 @@
 import {
   BOSS_WAVE_INTERVAL,
   BRUTE_MIN_WAVE,
+  EXTRACTION_WAVE,
   FLASHLIGHT_HALF_ANGLE,
   FLASHLIGHT_RANGE,
+  PERK_INTERVAL,
   SPAWN_MIN_DIST,
   SPAWN_RETRY,
   SPAWN_SIGHT_DIST,
@@ -13,8 +15,14 @@ import {
 } from '../config';
 import { ZOMBIES, spawnEnemy } from './enemies';
 import { mapSolids } from './map';
+import { rollDraft } from './perks';
 import { segmentClear } from './vision';
 import type { EnemyType, GameState, SpawnZone } from './types';
+
+/** The last wave is the escape: an endless horde while the squad reaches the exit. */
+export function isFinalWave(index: number): boolean {
+  return index >= EXTRACTION_WAVE;
+}
 
 export function isBossWave(index: number): boolean {
   return index % BOSS_WAVE_INTERVAL === 0;
@@ -118,6 +126,7 @@ export function updateWaves(state: GameState, dt: number, rng: Rng = Math.random
   const wave = state.wave;
 
   if (wave.phase === 'intermission') {
+    if (state.perkDraft) return; // a pending draft freezes the clock until someone picks
     wave.timer = Math.max(0, wave.timer - dt);
     if (wave.timer <= 0) startWave(state, rng);
     return;
@@ -137,10 +146,24 @@ export function updateWaves(state: GameState, dt: number, rng: Rng = Math.random
     }
   }
 
+  // The final wave never clears — it just keeps topping up the horde until the
+  // squad extracts (or dies). The escape objective decides the end (extraction.ts).
+  if (isFinalWave(wave.index)) {
+    if (wave.spawnQueue.length === 0) {
+      const squad = Math.max(1, state.players.filter((p) => p.alive).length);
+      wave.spawnQueue = buildWaveQueue(wave.index, rng, squad);
+    }
+    return;
+  }
+
   // wave is cleared once nothing is left to spawn and nothing is left alive
   if (wave.spawnQueue.length === 0 && state.enemies.length === 0) {
     wave.index += 1;
     wave.phase = 'intermission';
     wave.timer = WAVE_INTERMISSION;
+    // roguelite draft after every Nth wave cleared (not on the run into the finale)
+    if (wave.index - 1 >= 1 && (wave.index - 1) % PERK_INTERVAL === 0 && !isFinalWave(wave.index)) {
+      state.perkDraft = rollDraft(state, rng);
+    }
   }
 }

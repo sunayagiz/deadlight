@@ -28,6 +28,7 @@ export function createGameState(
   playerStart: { x: number; y: number } = { x: 480, y: 270 },
   dims: { width: number; height: number } = { width: 960, height: 540 },
   numPlayers = 1,
+  extractPoint: { x: number; y: number } = { x: dims.width - 220, y: dims.height - 220 },
 ): GameState {
   // fan the co-op squad out slightly around the start so they don't stack
   const players = Array.from({ length: Math.max(1, numPlayers) }, (_, i) => {
@@ -58,6 +59,12 @@ export function createGameState(
     walls: [...walls], // copy: each GameState must be an independent snapshot (netcode)
     doors: doors.map((d) => ({ ...d })),
     gameOver: false,
+    won: false,
+    cash: 0,
+    perks: {},
+    perkDraft: null,
+    extractPoint: { ...extractPoint },
+    extraction: null,
   };
 }
 
@@ -72,5 +79,7 @@ export function emptyInput(): PlayerInput {
     sprint: false,
     weaponSlot: -1,
     weaponCycle: 0,
+    buy: -1,
+    perk: -1,
   };
 }

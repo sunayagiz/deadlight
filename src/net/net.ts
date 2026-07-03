@@ -8,16 +8,26 @@ import type { NetMsg, Snapshot } from './protocol';
 const PREFIX = 'deadlight-og-';
 const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 
-// STUN helps ICE find a route across different networks (needed for real
-// cross-machine play, and to negotiate loopback candidates reliably).
-const PEER_OPTS = {
-  config: {
-    iceServers: [
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' },
-    ],
-  },
-};
+// ICE servers. STUN alone works for most home networks, but symmetric NAT /
+// CGNAT (common on mobile + some ISPs — the exact risk for a cross-country
+// friend) needs a TURN relay to fall back to. We ship public relays so it works
+// out of the box; drop your own creds in `window.DEADLIGHT_TURN` (array of
+// RTCIceServer) to override with a private/faster relay (e.g. Cloudflare).
+const DEFAULT_ICE: RTCIceServer[] = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  // OpenRelay — free public TURN (UDP/TCP/TLS) so tight NATs still connect.
+  { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+];
+
+function iceServers(): RTCIceServer[] {
+  const custom = (globalThis as { DEADLIGHT_TURN?: RTCIceServer[] }).DEADLIGHT_TURN;
+  return Array.isArray(custom) && custom.length > 0 ? custom : DEFAULT_ICE;
+}
+
+const PEER_OPTS = { config: { iceServers: iceServers() } };
 
 export function makeRoomCode(): string {
   let s = '';

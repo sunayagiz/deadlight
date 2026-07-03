@@ -1,4 +1,5 @@
 import { ZOMBIES } from './enemies';
+import { applyLifesteal, damageMult } from './perks';
 import { WEAPONS, type WeaponDef } from './weapons';
 import type { GameState, PlayerInput, PlayerState } from './types';
 
@@ -23,6 +24,7 @@ function hitArc(state: GameState, p: PlayerState, def: WeaponDef, damage: number
     if (Math.abs(angleDiff(Math.atan2(dy, dx), p.aimAngle)) > (def.arc ?? 0)) continue;
     e.hp -= damage;
     e.hitFlash = HIT_FLASH;
+    applyLifesteal(state, p, damage); // leech perk credit
   }
 }
 
@@ -40,13 +42,14 @@ export function updateMelee(state: GameState, p: PlayerState, input: PlayerInput
   const limited = def.startAmmo !== undefined;
   if (limited && (p.ammo[def.id] ?? 0) <= 0) return;
 
+  const dmgMult = damageMult(state);
   if (def.hold) {
-    hitArc(state, p, def, def.damage * dt); // dps
+    hitArc(state, p, def, def.damage * dmgMult * dt); // dps
     p.meleeSwing = 0.05;
     if (limited) p.ammo[def.id] = (p.ammo[def.id] ?? 0) - dt;
   } else {
     if (p.fireCooldown > 0) return;
-    hitArc(state, p, def, def.damage);
+    hitArc(state, p, def, def.damage * dmgMult);
     p.fireCooldown = 1 / def.fireRate;
     p.meleeSwing = SWING_TIME;
   }

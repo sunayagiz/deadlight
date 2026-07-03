@@ -26,6 +26,7 @@ function hostileBullet(
     splashRadius: 0,
     splashDamage: 0,
     hostile: true,
+    owner: -1,
   });
 }
 

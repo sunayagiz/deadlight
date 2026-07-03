@@ -1,4 +1,12 @@
-import type { BulletState, EnemyState, GameState, LootState, PlayerState, WaveState } from '../sim/types';
+import type {
+  BulletState,
+  EnemyState,
+  ExtractionState,
+  GameState,
+  LootState,
+  PlayerState,
+  WaveState,
+} from '../sim/types';
 
 /**
  * Host→guest snapshot: only the DYNAMIC state. Walls/spawn zones/map size are
@@ -17,6 +25,11 @@ export interface Snapshot {
   nb: number; // nextBulletId
   ne: number;
   nl: number;
+  won: boolean;
+  cash: number;
+  perks: Record<string, number>;
+  draft: string[] | null; // perkDraft
+  extract: ExtractionState | null;
 }
 
 export function snapshot(s: GameState): Snapshot {
@@ -32,6 +45,11 @@ export function snapshot(s: GameState): Snapshot {
     nb: s.nextBulletId,
     ne: s.nextEnemyId,
     nl: s.nextLootId,
+    won: s.won,
+    cash: s.cash,
+    perks: s.perks,
+    draft: s.perkDraft,
+    extract: s.extraction,
   };
 }
 
@@ -51,6 +69,11 @@ export function applySnapshot(s: GameState, snap: Snapshot): void {
   s.nextBulletId = snap.nb;
   s.nextEnemyId = snap.ne;
   s.nextLootId = snap.nl;
+  s.won = snap.won;
+  s.cash = snap.cash;
+  s.perks = snap.perks;
+  s.perkDraft = snap.draft;
+  s.extraction = snap.extract;
 }
 
 // Wire messages

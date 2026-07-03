@@ -2,11 +2,14 @@ import { updateBosses } from './bosses';
 import { updateCombat } from './combat';
 import { updateRevives } from './coop';
 import { updateEnemies } from './enemies';
+import { updateExtraction } from './extraction';
 import { getFlowField } from './flowfield';
 import { updateLoot } from './loot';
 import { mapSolids, updateDoors } from './map';
 import { updateMelee } from './melee';
 import { updateDash, updateMovement } from './movement';
+import { choosePerk, effectiveMaxHp, regenPerSec, speedMult } from './perks';
+import { buy } from './shop';
 import { updateWaves, type Rng } from './waves';
 import { cycleWeapon, equipWeapon, updateAim, updateBullets, updateFiring } from './weapons';
 import { emptyInput } from './state';
@@ -32,6 +35,10 @@ export function stepSim(
   const solids = mapSolids(state); // walls + still-closed doors
   const flow = getFlowField(state, solids); // multi-source: routes enemies to the nearest player
 
+  const spd = speedMult(state);
+  const regen = regenPerSec(state);
+  const intermission = state.wave.phase === 'intermission';
+
   // Each standing player acts on their own input; downed/dead players are inert.
   state.players.forEach((p, i) => {
     if (!isUp(p)) return;
@@ -40,10 +47,17 @@ export function stepSim(
     if (input.weaponSlot >= 0 && input.weaponSlot < p.owned.length) equipWeapon(p, p.owned[input.weaponSlot]);
     if (input.weaponCycle !== 0) cycleWeapon(p, input.weaponCycle);
     updateDash(p, input, dt);
-    updateMovement(p, input, solids, dt);
+    updateMovement(p, input, solids, dt, spd);
     updateAim(p, input);
     updateFiring(state, p, input, dt, rng);
     updateMelee(state, p, input, dt);
+    // perk regen (never past the effective cap)
+    if (regen > 0 && p.hp > 0) p.hp = Math.min(effectiveMaxHp(state), p.hp + regen * dt);
+    // between-wave shop + perk draft (host-authoritative via input)
+    if (intermission) {
+      if (input.buy >= 0) buy(state, i, input.buy);
+      if (input.perk >= 0 && state.perkDraft) choosePerk(state, input.perk);
+    }
   });
 
   updateRevives(state, list, dt); // bleedout + teammate revives
@@ -53,6 +67,7 @@ export function stepSim(
   updateCombat(state, dt, rng);
   updateLoot(state, dt);
   updateWaves(state, dt, rng);
+  updateExtraction(state, dt); // final-wave escape objective / win condition
 
   if (state.players.every((p) => !p.alive)) state.gameOver = true; // whole squad down
 }

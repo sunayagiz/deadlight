@@ -24,12 +24,13 @@ export function updateMovement(
   input: PlayerInput,
   walls: Wall[],
   dt: number,
+  speedMult = 1, // perk-driven multiplier (defaults to 1 for solo/tests)
 ): void {
   if (p.dash.timeLeft > 0) {
     p.vel = { x: p.dash.dirX * DASH_SPEED, y: p.dash.dirY * DASH_SPEED };
   } else {
     const dir = norm({ x: input.moveX, y: input.moveY });
-    const speed = PLAYER_SPEED * (input.sprint ? SPRINT_MULT : 1);
+    const speed = PLAYER_SPEED * (input.sprint ? SPRINT_MULT : 1) * speedMult;
     p.vel = { x: dir.x * speed, y: dir.y * speed };
   }
 

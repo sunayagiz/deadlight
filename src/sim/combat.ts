@@ -1,9 +1,10 @@
-import { BULLET_KNOCKBACK, PLAYER_RADIUS } from '../config';
+import { BULLET_KNOCKBACK, CASH_BOSS, CASH_PER_KILL, PLAYER_RADIUS } from '../config';
 import { downPlayer } from './coop';
 import { ZOMBIES } from './enemies';
 import { dropLoot } from './loot';
 import { mapSolids } from './map';
 import { isInvulnerable } from './movement';
+import { applyLifesteal, greedMult, thornsDamage } from './perks';
 import { isUp, type BulletState, type GameState, type PlayerState, type Vec2, type Wall } from './types';
 
 const HIT_FLASH = 0.08; // seconds an enemy flashes white after taking a hit
@@ -57,14 +58,16 @@ function firstEnemyHit(state: GameState, b: BulletState) {
 }
 
 /** Area damage to every enemy in radius, plus the player if caught in the blast (RPG self-harm). */
-function explode(state: GameState, at: Vec2, radius: number, damage: number): void {
+function explode(state: GameState, at: Vec2, radius: number, damage: number, owner: number): void {
   const r2 = radius * radius;
+  const shooter = state.players[owner];
   for (const e of state.enemies) {
     const dx = e.pos.x - at.x;
     const dy = e.pos.y - at.y;
     if (dx * dx + dy * dy <= r2) {
       e.hp -= damage;
       e.hitFlash = HIT_FLASH;
+      applyLifesteal(state, shooter, damage);
     }
   }
   for (const p of state.players) {
@@ -105,6 +108,7 @@ export function updateCombat(state: GameState, dt: number, rng: () => number = M
       if (hit) {
         hit.hp -= b.damage;
         hit.hitFlash = HIT_FLASH;
+        applyLifesteal(state, state.players[b.owner], b.damage); // leech perk credit
         // Shove along the bullet's travel direction; heavier bodies budge less.
         const vlen = Math.hypot(b.vel.x, b.vel.y);
         if (vlen > 0) {
@@ -117,26 +121,31 @@ export function updateCombat(state: GameState, dt: number, rng: () => number = M
     }
 
     if (struck || blocked || expired) {
-      if (b.splashRadius > 0) explode(state, b.pos, b.splashRadius, b.splashDamage);
+      if (b.splashRadius > 0) explode(state, b.pos, b.splashRadius, b.splashDamage, b.owner);
       continue; // bullet consumed
     }
     surviving.push(b);
   }
   state.bullets = surviving;
 
-  // Clear the dead, tally kills, and let each corpse maybe drop loot.
+  // Clear the dead, tally kills, award cash, and let each corpse maybe drop loot.
+  const greed = greedMult(state);
   const alive = [];
   for (const e of state.enemies) {
     if (e.hp > 0) {
       alive.push(e);
     } else {
       state.wave.killsThisWave += 1;
+      const bounty = ZOMBIES[e.type].boss ? CASH_BOSS : CASH_PER_KILL * ZOMBIES[e.type].cost;
+      state.cash += Math.round(bounty * greed);
       dropLoot(state, e.pos, rng);
     }
   }
   state.enemies = alive;
 
-  // Enemy contact damage (DPS) — each enemy claws the nearest standing player it overlaps.
+  // Enemy contact damage (DPS) — each enemy claws the nearest standing player it
+  // overlaps; the thorns perk reflects damage back onto the attacker.
+  const thorns = thornsDamage(state);
   for (const e of state.enemies) {
     const def = ZOMBIES[e.type];
     const rr = def.radius + PLAYER_RADIUS;
@@ -144,7 +153,13 @@ export function updateCombat(state: GameState, dt: number, rng: () => number = M
     if (!p) continue;
     const dx = p.pos.x - e.pos.x;
     const dy = p.pos.y - e.pos.y;
-    if (dx * dx + dy * dy <= rr * rr) hurt(state, p, def.contactDamage * dt);
+    if (dx * dx + dy * dy <= rr * rr) {
+      hurt(state, p, def.contactDamage * dt);
+      if (thorns > 0) {
+        e.hp -= thorns * dt;
+        e.hitFlash = HIT_FLASH;
+      }
+    }
   }
   // gameOver (all players down/dead) is decided in stepSim.
 }
