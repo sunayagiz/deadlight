@@ -13,8 +13,10 @@ import { createGameState } from '../sim/state';
 import { stepSim } from '../sim/step';
 import { lerp } from '../sim/vec';
 import { segmentClear } from '../sim/vision';
-import { WEAPONS, cycleWeapon, equipWeapon } from '../sim/weapons';
-import type { EnemyType, GameState, PlayerState } from '../sim/types';
+import { updateAim } from '../sim/weapons';
+import { updateDash, updateMovement } from '../sim/movement';
+import { WEAPONS } from '../sim/weapons';
+import { isUp, type EnemyType, type GameState, type PlayerInput, type PlayerState } from '../sim/types';
 import type { GuestNet, HostNet } from '../net/net';
 import { applySnapshot, snapshot } from '../net/protocol';
 import { getSession } from '../net/session';
@@ -102,6 +104,8 @@ export class GameScene extends Phaser.Scene {
   private localIndex = 0;
   private hostNet?: HostNet;
   private guestNet?: GuestNet;
+  private bcastAccum = 0; // host: throttle snapshots to ~30 Hz
+  private predicted?: PlayerState; // guest: locally-predicted own player (kills input lag)
   private camTarget!: Phaser.GameObjects.Image; // invisible; camera follows it
   private playerBodies = new Map<number, Phaser.GameObjects.Image>();
   private playerWeapons = new Map<number, Phaser.GameObjects.Image>();
@@ -339,6 +343,42 @@ export class GameScene extends Phaser.Scene {
     return this.state.players[this.localIndex] ?? this.state.players[0];
   }
 
+  /** Guest: advance the locally-predicted own player so movement/aim feels instant. */
+  private predictLocal(input: PlayerInput, dt: number): void {
+    const auth = this.state.players[this.localIndex];
+    if (!auth || !isUp(auth)) {
+      this.predicted = undefined; // downed/dead → render authoritative
+      return;
+    }
+    if (!this.predicted) this.predicted = structuredClone(auth);
+    const p = this.predicted;
+    updateDash(p, input, dt);
+    updateMovement(p, input, mapSolids(this.state), dt);
+    updateAim(p, input);
+  }
+
+  /** Guest: pull the prediction back toward the host's authoritative state (error correction). */
+  private reconcilePrediction(): void {
+    const auth = this.state.players[this.localIndex];
+    if (!auth || !this.predicted || !isUp(auth)) {
+      this.predicted = undefined;
+      return;
+    }
+    const p = this.predicted;
+    p.pos.x += (auth.pos.x - p.pos.x) * 0.25; // smooth correction, not a snap
+    p.pos.y += (auth.pos.y - p.pos.y) * 0.25;
+    // combat/inventory are host-authoritative; only position + aim stay local
+    p.hp = auth.hp;
+    p.weapon = auth.weapon;
+    p.owned = auth.owned;
+    p.ammo = auth.ammo;
+    p.spin = auth.spin;
+    p.meleeSwing = auth.meleeSwing;
+    p.fireCooldown = auth.fireCooldown;
+    p.downed = auth.downed;
+    p.alive = auth.alive;
+  }
+
   update(_time: number, deltaMs: number): void {
     const dt = deltaMs / 1000;
     const input = this.inputCollector.sample();
@@ -348,14 +388,25 @@ export class GameScene extends Phaser.Scene {
 
     let alpha = 1;
     if (this.role === 'guest') {
-      // Guests don't simulate — they send intent and render the host's snapshots.
+      // Guests send intent and render the host's snapshots, but PREDICT their own
+      // player locally so their movement/aim feels instant despite round-trip lag.
       this.guestNet!.sendInput(input);
-      if (this.guestNet!.latest) applySnapshot(this.state, this.guestNet!.latest);
+      if (this.guestNet!.latest) {
+        applySnapshot(this.state, this.guestNet!.latest);
+        this.reconcilePrediction();
+      }
+      this.predictLocal(input, dt);
     } else {
       if (this.role === 'host') this.hostNet!.inputs[0] = input;
       const inputs = this.role === 'host' ? this.hostNet!.inputs : [input];
       alpha = this.loop.tick(dt, () => stepSim(this.state, inputs, SIM_DT));
-      if (this.role === 'host') this.hostNet!.broadcast(snapshot(this.state));
+      if (this.role === 'host') {
+        this.bcastAccum += dt;
+        if (this.bcastAccum >= 1 / 30) {
+          this.bcastAccum = 0;
+          this.hostNet!.broadcast(snapshot(this.state));
+        }
+      }
     }
 
     // muzzle/recoil/sound off the LOCAL player firing (cooldown jumped up this frame)
@@ -592,13 +643,16 @@ export class GameScene extends Phaser.Scene {
   private renderState(alpha: number, dt: number): void {
     const players = this.state.players;
     const lp = this.local();
+    // guests render their own player from the local prediction (no round-trip lag)
+    const renderLocal = this.role === 'guest' && this.predicted ? this.predicted : lp;
     this.recoil = Math.max(0, this.recoil - dt * 60);
-    // local player interpolated (host/solo); guests render raw snapshot positions
-    const lx = this.role === 'guest' ? lp.pos.x : lerp(this.prevPlayerPos.x, lp.pos.x, alpha);
-    const ly = this.role === 'guest' ? lp.pos.y : lerp(this.prevPlayerPos.y, lp.pos.y, alpha);
+    const lx = this.role === 'guest' ? renderLocal.pos.x : lerp(this.prevPlayerPos.x, lp.pos.x, alpha);
+    const ly = this.role === 'guest' ? renderLocal.pos.y : lerp(this.prevPlayerPos.y, lp.pos.y, alpha);
     this.camTarget.setPosition(lx, ly);
     const posOf = (i: number, pl: PlayerState) =>
       i === this.localIndex ? { x: lx, y: ly } : { x: pl.pos.x, y: pl.pos.y };
+    // for the local slot, aim/weapon come from the prediction so they're instant
+    const srcOf = (i: number, pl: PlayerState) => (i === this.localIndex ? renderLocal : pl);
 
     // Draw every living player: body, held weapon, downed revive ring.
     const seenP = new Set<number>();
@@ -606,9 +660,10 @@ export class GameScene extends Phaser.Scene {
       if (!pl.alive) return;
       seenP.add(i);
       const isLocal = i === this.localIndex;
+      const src = srcOf(i, pl); // predicted for the local guest, else authoritative
       const { x: px, y: py } = posOf(i, pl);
-      const kx = isLocal ? -Math.cos(pl.aimAngle) * this.recoil : 0;
-      const ky = isLocal ? -Math.sin(pl.aimAngle) * this.recoil : 0;
+      const kx = isLocal ? -Math.cos(src.aimAngle) * this.recoil : 0;
+      const ky = isLocal ? -Math.sin(src.aimAngle) * this.recoil : 0;
 
       let body = this.playerBodies.get(i);
       if (!body) {
@@ -616,9 +671,9 @@ export class GameScene extends Phaser.Scene {
         this.setSpriteHeight(body, PLAYER_RADIUS * 4.2);
         this.playerBodies.set(i, body);
       }
-      body.setPosition(px + kx, py + ky).setRotation(pl.aimAngle - ART_FACING);
-      if (pl.downed) body.setTint(0x6a1418);
-      else if (pl.dash.timeLeft > 0) body.setTint(COLORS.dashTint);
+      body.setPosition(px + kx, py + ky).setRotation(src.aimAngle - ART_FACING);
+      if (src.downed) body.setTint(0x6a1418);
+      else if (src.dash.timeLeft > 0) body.setTint(COLORS.dashTint);
       else if (!isLocal) body.setTint(TEAM_TINT[i % 4]);
       else body.clearTint();
 
@@ -627,13 +682,13 @@ export class GameScene extends Phaser.Scene {
         wpn = this.add.image(0, 0, 'wpn_pistol').setOrigin(0.16, 0.5);
         this.playerWeapons.set(i, wpn);
       }
-      const wdef = WEAPONS[pl.weapon];
+      const wdef = WEAPONS[src.weapon];
       const hand = wdef.kind === 'melee' ? 6 : 13;
       wpn
-        .setVisible(!pl.downed)
-        .setTexture(`wpn_${pl.weapon}`)
-        .setPosition(px + kx + Math.cos(pl.aimAngle) * hand, py + ky + Math.sin(pl.aimAngle) * hand)
-        .setRotation(pl.aimAngle);
+        .setVisible(!src.downed)
+        .setTexture(`wpn_${src.weapon}`)
+        .setPosition(px + kx + Math.cos(src.aimAngle) * hand, py + ky + Math.sin(src.aimAngle) * hand)
+        .setRotation(src.aimAngle);
       this.setSpriteHeight(wpn, wdef.kind === 'melee' ? 26 : 20);
 
       // downed → pulsing revive ring showing progress
@@ -649,7 +704,7 @@ export class GameScene extends Phaser.Scene {
         ring.setVisible(false);
       }
 
-      if (isLocal && pl.dash.timeLeft > 0) {
+      if (isLocal && src.dash.timeLeft > 0) {
         this.dashGhostCd -= dt;
         if (this.dashGhostCd <= 0) {
           this.dashGhostCd = 0.028;
@@ -673,13 +728,14 @@ export class GameScene extends Phaser.Scene {
     this.darkRT.fill(0x05060a, 0.94);
     players.forEach((pl, i) => {
       if (!pl.alive) return;
+      const src = srcOf(i, pl);
       const { x: px, y: py } = posOf(i, pl);
       this.glowImg.setPosition(px - ox, py - oy).setDisplaySize(AMBIENT_RADIUS * 2.9, AMBIENT_RADIUS * 2.9).setAlpha(1);
       this.darkRT.erase(this.glowImg);
-      if (!pl.downed) {
+      if (!src.downed) {
         this.coneImg
           .setPosition(px - ox, py - oy)
-          .setRotation(pl.aimAngle)
+          .setRotation(src.aimAngle)
           .setDisplaySize(coneLen, 2 * Math.tan(FLASHLIGHT_HALF_ANGLE) * coneLen * 1.35);
         this.darkRT.erase(this.coneImg);
       }
@@ -709,10 +765,10 @@ export class GameScene extends Phaser.Scene {
       ex > view.x - 90 && ex < view.right + 90 && ey > view.y - 90 && ey < view.bottom + 90;
 
     // Melee swing wedge (local player).
-    const def = WEAPONS[lp.weapon];
-    if (def.kind === 'melee' && lp.meleeSwing > 0) {
+    const def = WEAPONS[renderLocal.weapon];
+    if (def.kind === 'melee' && renderLocal.meleeSwing > 0) {
       const halfArcDeg = ((def.arc ?? 0) * 180) / Math.PI;
-      const aimDeg = (lp.aimAngle * 180) / Math.PI;
+      const aimDeg = (renderLocal.aimAngle * 180) / Math.PI;
       this.meleeArc
         .setPosition(x, y)
         .setRadius(def.range ?? 40)
