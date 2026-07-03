@@ -26,11 +26,17 @@ function hostileBullet(
     splashRadius: 0,
     splashDamage: 0,
     hostile: true,
+    owner: -1,
   });
 }
 
 function executeAttack(state: GameState, e: EnemyState, attack: BossAttack, rng: () => number): void {
-  const p = state.player;
+  // target the nearest standing player (fall back to players[0])
+  const up = state.players.filter((q) => q.alive && !q.downed);
+  const pool = up.length > 0 ? up : state.players;
+  const p = pool.reduce((a, b) =>
+    (a.pos.x - e.pos.x) ** 2 + (a.pos.y - e.pos.y) ** 2 <= (b.pos.x - e.pos.x) ** 2 + (b.pos.y - e.pos.y) ** 2 ? a : b,
+  );
   if (attack === 'spew') {
     const n = 14; // radial ring of projectiles
     for (let i = 0; i < n; i++) hostileBullet(state, e.pos.x, e.pos.y, (i / n) * Math.PI * 2, 240, 16, 1.8);

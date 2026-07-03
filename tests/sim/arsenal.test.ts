@@ -19,6 +19,7 @@ function rpgBullet(x: number, y: number): BulletState {
     splashRadius: def.splashRadius!,
     splashDamage: def.splashDamage!,
     hostile: false,
+    owner: 0,
   };
 }
 
@@ -26,7 +27,7 @@ describe('arsenal', () => {
   it('shotgun fires a burst of pellets in one trigger pull', () => {
     const s = createGameState([]);
     s.player.weapon = 'shotgun';
-    updateFiring(s, held, SIM_DT, () => 0.5);
+    updateFiring(s, s.player, held, SIM_DT, () => 0.5);
     expect(s.bullets).toHaveLength(WEAPONS.shotgun.pellets!);
   });
 
@@ -35,7 +36,7 @@ describe('arsenal', () => {
     s.player.weapon = 'shotgun';
     const vals = [0, 0.25, 0.5, 0.75, 1, 0.1, 0.9, 0.4];
     let i = 0;
-    updateFiring(s, held, SIM_DT, () => vals[i++ % vals.length]);
+    updateFiring(s, s.player, held, SIM_DT, () => vals[i++ % vals.length]);
     const ys = new Set(s.bullets.map((b) => Math.round(b.vel.y)));
     expect(ys.size).toBeGreaterThan(1); // not all going perfectly straight
   });
@@ -46,7 +47,7 @@ describe('arsenal', () => {
     s.player.ammo.minigun = 999;
     expect(s.player.spin).toBe(0);
     for (let t = 0; t < WEAPONS.minigun.spinUpTime!; t += SIM_DT) {
-      updateFiring(s, held, SIM_DT, () => 0.5);
+      updateFiring(s, s.player, held, SIM_DT, () => 0.5);
     }
     expect(s.player.spin).toBeGreaterThan(0.9);
   });
@@ -55,12 +56,12 @@ describe('arsenal', () => {
     const s = createGameState([]);
     s.player.weapon = 'rpg';
     s.player.ammo.rpg = 1;
-    updateFiring(s, held, SIM_DT, () => 0.5);
+    updateFiring(s, s.player, held, SIM_DT, () => 0.5);
     expect(s.bullets.length).toBe(1);
     expect(s.player.ammo.rpg).toBe(0);
     // cooldown elapsed but no ammo -> nothing more
     s.player.fireCooldown = 0;
-    updateFiring(s, held, SIM_DT, () => 0.5);
+    updateFiring(s, s.player, held, SIM_DT, () => 0.5);
     expect(s.bullets.length).toBe(1);
   });
 

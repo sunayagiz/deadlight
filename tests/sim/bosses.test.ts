@@ -53,7 +53,7 @@ describe('boss attacks', () => {
 
 describe('hostile projectiles', () => {
   function hostile(x: number, y: number, damage: number): BulletState {
-    return { id: 1, pos: { x, y }, vel: { x: 0, y: 0 }, ttl: 1, damage, splashRadius: 0, splashDamage: 0, hostile: true };
+    return { id: 1, pos: { x, y }, vel: { x: 0, y: 0 }, ttl: 1, damage, splashRadius: 0, splashDamage: 0, hostile: true, owner: -1 };
   }
 
   it('damages the player on contact', () => {

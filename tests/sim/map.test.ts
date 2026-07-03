@@ -1,37 +1,82 @@
 import { describe, it, expect } from 'vitest';
 import { PLAYER_RADIUS, SIM_DT } from '../../src/config';
+import { updateInteractions } from '../../src/sim/cod';
 import { buildMap, mapSolids, updateDoors } from '../../src/sim/map';
 import { updateMovement } from '../../src/sim/movement';
 import { createGameState, createPlayer, emptyInput } from '../../src/sim/state';
 import { segmentClear } from '../../src/sim/vision';
-import type { Door } from '../../src/sim/types';
+
+function bigMapState() {
+  const m = buildMap();
+  return createGameState(m.walls, m.spawnZones, m.doors, m.playerStart, {
+    width: m.width,
+    height: m.height,
+  });
+}
 
 describe('map + doors', () => {
-  it('buildMap has walls, two doors, spawn zones and a player start', () => {
+  it('buildMap: 9x7-screen carved facility with gated progression', () => {
     const m = buildMap();
-    expect(m.walls.length).toBeGreaterThan(4);
-    expect(m.doors).toHaveLength(2);
-    expect(m.spawnZones.length).toBeGreaterThan(0);
+    expect(m.width).toBe(8640);
+    expect(m.height).toBe(3840);
+    expect(m.walls.length).toBeGreaterThan(50); // carved geometry decomposes into many rects
+    expect(m.doors.length).toBeGreaterThanOrEqual(8);
     expect(m.doors.every((d) => !d.open)).toBe(true); // all start closed
+    expect(m.doors.some((d) => d.cost >= 750)).toBe(true); // pay-to-open gates exist
+    expect(m.interactables.length).toBeGreaterThanOrEqual(5); // box/PaP/wall/power buyables
+    expect(m.spawnZones.some((z) => (z.minWave ?? 0) <= 1)).toBe(true); // wave-1 pressure exists
+    expect(m.spawnZones.length).toBeGreaterThanOrEqual(10);
+  });
+
+  it('no spawn zone or the player start is buried in rock', () => {
+    const m = buildMap();
+    const inSolid = (x: number, y: number) =>
+      m.walls.some((w) => x > w.x && x < w.x + w.w && y > w.y && y < w.y + w.h);
+    const clear = (x: number, y: number) =>
+      [
+        [0, 0],
+        [-20, 0],
+        [20, 0],
+        [0, -20],
+        [0, 20],
+      ].every(([dx, dy]) => !inSolid(x + dx, y + dy));
+    expect(clear(m.playerStart.x, m.playerStart.y)).toBe(true);
+    for (const z of m.spawnZones) {
+      expect(clear(z.x, z.y), `zone ${z.x},${z.y}`).toBe(true);
+    }
   });
 
   it('mapSolids counts closed doors as solid and drops open ones', () => {
-    const m = buildMap();
-    const s = createGameState(m.walls, m.spawnZones, m.doors, m.playerStart);
+    const s = bigMapState();
     const withClosed = mapSolids(s).length;
     s.doors[0].open = true;
     const withOneOpen = mapSolids(s).length;
     expect(withOneOpen).toBe(withClosed - 1);
   });
 
-  it('a door opens when the player is near and stays shut when far', () => {
-    const doors: Door[] = [{ x: 200, y: 200, w: 20, h: 80, open: false }];
-    const far = createPlayer(600, 200);
-    updateDoors(doors, far);
-    expect(doors[0].open).toBe(false);
-    const near = createPlayer(230, 240); // right at the door
-    updateDoors(doors, near);
-    expect(doors[0].open).toBe(true);
+  it('a free interior door opens on proximity; far doors stay shut', () => {
+    const s = bigMapState();
+    const d = s.doors.find((x) => x.cost === 0)!;
+    updateDoors(s); // player at lobby start, far from it
+    expect(d.open).toBe(false);
+    s.player.pos = { x: d.x + d.w / 2, y: d.y + d.h / 2 - 30 };
+    updateDoors(s);
+    expect(d.open).toBe(true);
+  });
+
+  it('a pay-door ignores proximity and only opens when bought with enough cash', () => {
+    const s = bigMapState();
+    const gate = s.doors.find((x) => x.cost > 0)!;
+    s.player.pos = { x: gate.x + gate.w / 2 + 20, y: gate.y + gate.h / 2 };
+    updateDoors(s);
+    expect(gate.open).toBe(false); // proximity alone never opens a pay-door
+    s.cash = gate.cost - 1;
+    updateInteractions(s, [{ ...emptyInput(), use: true }], () => 0.5);
+    expect(gate.open).toBe(false); // can't afford it
+    s.cash = gate.cost + 50;
+    updateInteractions(s, [{ ...emptyInput(), use: true }], () => 0.5);
+    expect(gate.open).toBe(true); // bought
+    expect(s.cash).toBe(50); // charged exactly the door's cost
   });
 
   it('a closed door blocks movement like a wall', () => {
@@ -55,5 +100,11 @@ describe('line of sight', () => {
   it('is not blocked by a wall off to the side', () => {
     const wall = { x: 50, y: 100, w: 10, h: 40 };
     expect(segmentClear({ x: 0, y: 0 }, { x: 100, y: 0 }, [wall])).toBe(true);
+  });
+
+  it('the lobby cannot see into the sealed grand hall', () => {
+    const s = bigMapState();
+    // from lobby start straight north to hall center: blocked by rock + closed D6
+    expect(segmentClear(s.player.pos, { x: 4440, y: 600 }, mapSolids(s))).toBe(false);
   });
 });

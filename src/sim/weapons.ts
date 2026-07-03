@@ -1,3 +1,5 @@
+import { PAP_DMG_MULT } from '../config';
+import { damageMult, fireRateMult } from './perks';
 import type { GameState, PlayerInput, PlayerState, WeaponId, WeaponKind } from './types';
 
 export interface WeaponDef {
@@ -36,6 +38,8 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
   katana: { id: 'katana', name: 'Katana', kind: 'melee', damage: 70, fireRate: 2.2, range: 64, arc: 0.9 },
   bat: { id: 'bat', name: 'Baseball Bat', kind: 'melee', damage: 50, fireRate: 2.6, range: 58, arc: 1.0 },
   chainsaw: { id: 'chainsaw', name: 'Chainsaw', kind: 'melee', damage: 60, fireRate: 1, range: 52, arc: 0.6, hold: true, startAmmo: 300 },
+  // Wonder weapon — energy pistol with a nasty splash; Mystery Box only.
+  raygun: { id: 'raygun', name: 'Ray Gun', kind: 'gun', damage: 110, fireRate: 4, bulletSpeed: 820, bulletTtl: 1.2, pellets: 1, spread: 0.02, splashRadius: 55, splashDamage: 70, startAmmo: 160 },
 };
 
 export function updateAim(p: PlayerState, input: PlayerInput): void {
@@ -63,11 +67,11 @@ export function hasAmmo(p: PlayerState, def: WeaponDef): boolean {
 /** Guns and the RPG spawn bullets here. Melee is resolved separately in melee.ts. */
 export function updateFiring(
   state: GameState,
+  p: PlayerState,
   input: PlayerInput,
   dt: number,
   rng: () => number = Math.random,
 ): void {
-  const p = state.player;
   p.fireCooldown = Math.max(0, p.fireCooldown - dt);
   const def = WEAPONS[p.weapon];
 
@@ -82,6 +86,9 @@ export function updateFiring(
   if (!input.fire || p.fireCooldown > 0 || !hasAmmo(p, def)) return;
 
   const rateScale = def.id === 'minigun' ? 0.2 + 0.8 * p.spin : 1;
+  const pap = state.packed[p.weapon] ? PAP_DMG_MULT : 1; // Pack-a-Punch
+  const dmg = def.damage * damageMult(state) * pap; // perk- + PaP-scaled
+  const owner = state.players.indexOf(p); // life-steal credit / friendly-fire attribution
   const pellets = def.pellets ?? 1;
   const spread = def.spread ?? 0;
   for (let i = 0; i < pellets; i++) {
@@ -92,14 +99,15 @@ export function updateFiring(
       pos: { x: p.pos.x, y: p.pos.y },
       vel: { x: Math.cos(a) * def.bulletSpeed!, y: Math.sin(a) * def.bulletSpeed! },
       ttl: def.bulletTtl!,
-      damage: def.damage,
+      damage: dmg,
       splashRadius: def.splashRadius ?? 0,
-      splashDamage: def.splashDamage ?? 0,
+      splashDamage: (def.splashDamage ?? 0) * damageMult(state) * pap,
       hostile: false,
+      owner,
     });
   }
   if (def.startAmmo !== undefined) p.ammo[def.id] = (p.ammo[def.id] ?? 0) - 1;
-  p.fireCooldown = 1 / (def.fireRate * rateScale);
+  p.fireCooldown = 1 / (def.fireRate * rateScale * fireRateMult(state));
 }
 
 /** Integrate bullet motion and age them. Removal + explosions happen in combat. */

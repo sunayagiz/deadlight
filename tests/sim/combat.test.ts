@@ -6,7 +6,7 @@ import { createGameState } from '../../src/sim/state';
 import type { BulletState } from '../../src/sim/types';
 
 function bullet(x: number, y: number, damage: number): BulletState {
-  return { id: 1, pos: { x, y }, vel: { x: 0, y: 0 }, ttl: 1, damage, splashRadius: 0, splashDamage: 0, hostile: false };
+  return { id: 1, pos: { x, y }, vel: { x: 0, y: 0 }, ttl: 1, damage, splashRadius: 0, splashDamage: 0, hostile: false, owner: 0 };
 }
 
 describe('combat', () => {
@@ -54,13 +54,24 @@ describe('combat', () => {
     expect(s.player.hp).toBe(PLAYER_MAX_HP);
   });
 
-  it('player death clamps hp to 0 and sets gameOver', () => {
-    const s = createGameState([]);
+  it('a solo player dies (no revive possible) when hp runs out', () => {
+    const s = createGameState([]); // 1 player
     s.player.pos = { x: 100, y: 100 };
     s.player.hp = 1;
     spawnEnemy(s, 'brute', { x: 100, y: 100 });
     for (let i = 0; i < 10; i++) updateCombat(s, SIM_DT);
     expect(s.player.hp).toBe(0);
-    expect(s.gameOver).toBe(true);
+    expect(s.player.alive).toBe(false); // solo => dead outright; stepSim raises gameOver
+  });
+});
+
+describe('knockback', () => {
+  it('a bullet shoves the enemy along its travel direction', () => {
+    const s = createGameState([]);
+    const e = spawnEnemy(s, 'shambler', { x: 100, y: 100 });
+    s.bullets = [{ ...bullet(100, 100, 5), vel: { x: 900, y: 0 } }];
+    updateCombat(s, SIM_DT);
+    expect(e.pos.x).toBeGreaterThan(100); // pushed east
+    expect(e.pos.y).toBe(100);
   });
 });

@@ -1,0 +1,32 @@
+import puppeteer from 'puppeteer-core';
+const CHROME='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+const OUT='/private/tmp/claude-501/-Users-ovguhan/9a50957b-90bd-40f5-8b94-28bce2b8b793/scratchpad';
+const b=await puppeteer.launch({executablePath:CHROME,headless:'new',
+  args:['--no-sandbox','--use-gl=swiftshader','--disable-background-timer-throttling','--disable-backgrounding-occluded-windows','--disable-renderer-backgrounding']});
+const host=await b.newPage(); await host.setViewport({width:960,height:540});
+const guest=await b.newPage(); await guest.setViewport({width:960,height:540});
+const log=(t,p)=>p.on('console',m=>{if(m.type()==='error')console.log(t,'ERR',m.text())});
+log('H',host); log('G',guest);
+await host.goto('http://localhost:4173/',{waitUntil:'networkidle2'});
+await host.click('#host');
+await host.waitForFunction(()=>{const s=document.querySelector('#start');return s&&!s.disabled;},{timeout:15000});
+const code=await host.$eval('.code',e=>e.textContent.trim());
+console.log('room code:',code);
+await guest.goto('http://localhost:4173/',{waitUntil:'networkidle2'});
+await guest.click('#join');
+await guest.type('#code',code);
+await guest.click('#connect');
+await new Promise(r=>setTimeout(r,2500));
+await host.bringToFront();
+await host.waitForFunction(()=>{const p=document.querySelector('#pc');return p&&p.textContent.includes('2');},{timeout:15000}).catch(()=>console.log('host never saw 2 players'));
+await host.click('#start');
+await new Promise(r=>setTimeout(r,4000));
+await host.bringToFront(); await new Promise(r=>setTimeout(r,300));
+await host.screenshot({path:`${OUT}/coop_host.png`});
+await guest.bringToFront(); await new Promise(r=>setTimeout(r,300));
+await guest.screenshot({path:`${OUT}/coop_guest.png`});
+// read guest net counters from HUD text if present
+const gtitle=await guest.title();
+console.log('guest title:',gtitle);
+console.log('COOP SHOT DONE');
+await b.close();

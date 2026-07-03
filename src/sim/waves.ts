@@ -1,13 +1,49 @@
 import {
   BOSS_WAVE_INTERVAL,
   BRUTE_MIN_WAVE,
+  DOG_ROUND_EVERY,
+  DOG_ROUND_FIRST,
+  EXTRACTION_WAVE,
+  FLASHLIGHT_HALF_ANGLE,
+  FLASHLIGHT_RANGE,
+  PERK_INTERVAL,
+  POWERUP_TTL,
+  SPAWN_MIN_DIST,
+  SPAWN_RETRY,
+  SPAWN_SIGHT_DIST,
   WAVE_BUDGET_BASE,
   WAVE_BUDGET_GROWTH,
   WAVE_INTERMISSION,
   WAVE_SPAWN_INTERVAL,
 } from '../config';
-import { ZOMBIES, spawnEnemy } from './enemies';
+import { setNotice } from './cod';
+import { ZOMBIES, maxAlive, spawnEnemy } from './enemies';
+import { sampleFlow, type FlowField } from './flowfield';
+import { mapSolids } from './map';
+import { rollDraft } from './perks';
+import { segmentClear } from './vision';
 import type { EnemyType, GameState, SpawnZone } from './types';
+
+/** Hellhound special round: from DOG_ROUND_FIRST, every DOG_ROUND_EVERY-th wave (never on a boss/final wave). */
+export function isDogRound(index: number): boolean {
+  return (
+    index >= DOG_ROUND_FIRST &&
+    index % DOG_ROUND_EVERY === 0 &&
+    !isBossWave(index) &&
+    index < EXTRACTION_WAVE
+  );
+}
+
+/** A pack of hounds sized to the wave and squad. */
+export function buildDogPack(index: number, squad = 1): EnemyType[] {
+  const n = Math.round((6 + index * 0.8) * (0.7 + 0.3 * squad));
+  return Array.from({ length: n }, () => 'hound' as EnemyType);
+}
+
+/** The last wave is the escape: an endless horde while the squad reaches the exit. */
+export function isFinalWave(index: number): boolean {
+  return index >= EXTRACTION_WAVE;
+}
 
 export function isBossWave(index: number): boolean {
   return index % BOSS_WAVE_INTERVAL === 0;
@@ -32,8 +68,8 @@ function affordable(index: number, budget: number): EnemyType[] {
 }
 
 /** Spend the wave's budget on random affordable enemy rows to build a spawn queue. */
-export function buildWaveQueue(index: number, rng: Rng): EnemyType[] {
-  let budget = waveBudget(index);
+export function buildWaveQueue(index: number, rng: Rng, squad = 1): EnemyType[] {
+  let budget = Math.round(waveBudget(index) * (0.6 + 0.4 * squad)); // +40% per extra player
   const queue: EnemyType[] = [];
   for (;;) {
     const opts = affordable(index, budget);
@@ -45,45 +81,132 @@ export function buildWaveQueue(index: number, rng: Rng): EnemyType[] {
   return queue;
 }
 
-function pickZone(state: GameState, rng: Rng): SpawnZone {
-  const zones = state.spawnZones;
-  if (zones.length === 0) return { x: 24, y: 24 }; // fallback; real maps always define zones
-  return zones[Math.floor(rng() * zones.length) % zones.length];
+/** Shortest signed angular distance from a to b. */
+function angleDiff(a: number, b: number): number {
+  let d = a - b;
+  while (d > Math.PI) d -= 2 * Math.PI;
+  while (d < -Math.PI) d += 2 * Math.PI;
+  return d;
 }
 
-function startWave(state: GameState, rng: Rng): void {
+/**
+ * L4D-style spawn validity: the zone's room must be unlocked (minWave), it
+ * must not be right on top of a player, and it must not sit inside the
+ * player's flashlight view (in cone + close + clear line of sight).
+ */
+export function zoneValid(state: GameState, z: SpawnZone, flow?: FlowField): boolean {
+  if ((z.minWave ?? 0) > state.wave.index) return false;
+  // Only spawn where zombies can actually REACH a player: a zone sealed behind a
+  // still-closed (unbought) door has no flow-field value, so it's rejected. This
+  // keeps the horde in the rooms you've opened — never trapped in a locked room.
+  if (flow && !sampleFlow(flow, z.x, z.y)) return false;
+  const solids = mapSolids(state);
+  // rejected if it's too close to, or inside the lit view of, ANY standing player
+  for (const p of state.players) {
+    if (!p.alive || p.downed) continue;
+    const dx = z.x - p.pos.x;
+    const dy = z.y - p.pos.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist < SPAWN_MIN_DIST) return false;
+    const inCone =
+      dist < FLASHLIGHT_RANGE * SPAWN_SIGHT_DIST &&
+      Math.abs(angleDiff(Math.atan2(dy, dx), p.aimAngle)) < FLASHLIGHT_HALF_ANGLE * 1.25;
+    if (inCone && segmentClear(p.pos, { x: z.x, y: z.y }, solids)) return false;
+  }
+  return true;
+}
+
+/** A random valid zone, or null when every zone is currently watched/locked (caller retries). */
+function pickZone(state: GameState, rng: Rng, flow?: FlowField): SpawnZone | null {
+  const valid = state.spawnZones.filter((z) => zoneValid(state, z, flow));
+  if (valid.length === 0) return state.spawnZones.length === 0 ? { x: 24, y: 24 } : null;
+  return valid[Math.floor(rng() * valid.length) % valid.length];
+}
+
+/** Least-bad zone for a boss entrance: reachable, unlocked, farthest from the squad's centroid. */
+function pickBossZone(state: GameState, flow?: FlowField): SpawnZone {
+  const up = state.players.filter((p) => p.alive);
+  const cx = up.reduce((s, p) => s + p.pos.x, 0) / (up.length || 1);
+  const cy = up.reduce((s, p) => s + p.pos.y, 0) / (up.length || 1);
+  const eligible = state.spawnZones.filter(
+    (z) => (z.minWave ?? 0) <= state.wave.index && (!flow || sampleFlow(flow, z.x, z.y)),
+  );
+  const pool = eligible.length > 0 ? eligible : [{ x: cx || 24, y: cy || 24 }];
+  return pool.reduce((a, b) => (Math.hypot(a.x - cx, a.y - cy) >= Math.hypot(b.x - cx, b.y - cy) ? a : b));
+}
+
+function startWave(state: GameState, rng: Rng, flow?: FlowField): void {
   const wave = state.wave;
   wave.phase = 'active';
-  wave.spawnQueue = buildWaveQueue(wave.index, rng);
+  // budget scales with how many players are still in the fight
+  const squad = Math.max(1, state.players.filter((p) => p.alive).length);
+  state.dogRound = isDogRound(wave.index);
+  if (state.dogRound) {
+    wave.spawnQueue = buildDogPack(wave.index, squad); // a fast glowing hound pack
+    setNotice(state, 'HELLHOUNDS');
+  } else {
+    wave.spawnQueue = buildWaveQueue(wave.index, rng, squad);
+    if (isBossWave(wave.index)) {
+      spawnEnemy(state, bossForWave(wave.index), pickBossZone(state, flow)); // boss enters alongside the wave
+    }
+  }
   wave.spawnCooldown = 0; // first enemy spawns on the next tick
   wave.killsThisWave = 0;
-  if (isBossWave(wave.index)) {
-    spawnEnemy(state, bossForWave(wave.index), pickZone(state, rng)); // boss enters alongside the wave
-  }
 }
 
-export function updateWaves(state: GameState, dt: number, rng: Rng = Math.random): void {
+export function updateWaves(state: GameState, dt: number, rng: Rng = Math.random, flow?: FlowField): void {
   if (state.gameOver) return;
   const wave = state.wave;
 
   if (wave.phase === 'intermission') {
+    if (state.perkDraft) return; // a pending draft freezes the clock until someone picks
     wave.timer = Math.max(0, wave.timer - dt);
-    if (wave.timer <= 0) startWave(state, rng);
+    if (wave.timer <= 0) startWave(state, rng, flow);
     return;
   }
 
-  // active phase: drain the spawn queue on an interval
+  // active phase: drain the spawn queue on an interval; if every zone is
+  // watched or locked, HOLD the spawn and retry — budget is never skipped.
+  // COD max-on-screen cap: once the horde is at capacity, HOLD until kills free
+  // a slot, so a big wave becomes a relentless advancing stream, not a lag-bomb.
+  const squad = Math.max(1, state.players.filter((p) => p.alive).length);
+  const atCap = state.enemies.length >= maxAlive(squad);
   wave.spawnCooldown -= dt;
-  if (wave.spawnQueue.length > 0 && wave.spawnCooldown <= 0) {
-    const type = wave.spawnQueue.shift()!;
-    spawnEnemy(state, type, pickZone(state, rng));
-    wave.spawnCooldown = WAVE_SPAWN_INTERVAL;
+  if (wave.spawnQueue.length > 0 && wave.spawnCooldown <= 0 && !atCap) {
+    const zone = pickZone(state, rng, flow);
+    if (zone) {
+      const type = wave.spawnQueue.shift()!;
+      spawnEnemy(state, type, zone);
+      wave.spawnCooldown = WAVE_SPAWN_INTERVAL;
+    } else {
+      wave.spawnCooldown = SPAWN_RETRY;
+    }
+  }
+
+  // The final wave never clears — it just keeps topping up the horde until the
+  // squad extracts (or dies). The escape objective decides the end (extraction.ts).
+  if (isFinalWave(wave.index)) {
+    if (wave.spawnQueue.length === 0) {
+      const squad = Math.max(1, state.players.filter((p) => p.alive).length);
+      wave.spawnQueue = buildWaveQueue(wave.index, rng, squad);
+    }
+    return;
   }
 
   // wave is cleared once nothing is left to spawn and nothing is left alive
   if (wave.spawnQueue.length === 0 && state.enemies.length === 0) {
+    // clearing a hellhound round always drops a Max Ammo (COD guarantee)
+    if (state.dogRound) {
+      const at = state.players.find((p) => p.alive) ?? state.players[0];
+      state.powerups.push({ id: state.nextPowerUpId++, kind: 'maxammo', x: at.pos.x, y: at.pos.y, ttl: POWERUP_TTL });
+      state.dogRound = false;
+    }
     wave.index += 1;
     wave.phase = 'intermission';
     wave.timer = WAVE_INTERMISSION;
+    // roguelite draft after every Nth wave cleared (not on the run into the finale)
+    if (wave.index - 1 >= 1 && (wave.index - 1) % PERK_INTERVAL === 0 && !isFinalWave(wave.index)) {
+      state.perkDraft = rollDraft(state, rng);
+    }
   }
 }
