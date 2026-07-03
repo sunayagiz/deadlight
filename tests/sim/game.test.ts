@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { PLAYER_MAX_HP, SIM_DT } from '../../src/config';
+import { spawnEnemy } from '../../src/sim/enemies';
 import { createGameState, emptyInput } from '../../src/sim/state';
 import { stepSim } from '../../src/sim/step';
 import { testRoomSpawnZones, testRoomWalls } from '../../src/sim/room';
@@ -27,7 +28,8 @@ describe('game loop integration', () => {
   it('freezes the world once the player dies', () => {
     const s = createGameState(testRoomWalls(), testRoomSpawnZones());
     s.player.hp = 1;
-    run(s, 12);
+    spawnEnemy(s, 'runner', { x: s.player.pos.x + 22, y: s.player.pos.y }); // adjacent → lethal contact, deterministic
+    run(s, 3);
     expect(s.gameOver).toBe(true);
     const enemiesAtDeath = s.enemies.length;
     const timeAtDeath = s.time;

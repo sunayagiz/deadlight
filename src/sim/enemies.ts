@@ -1,6 +1,8 @@
 import {
   BOSS_HP_SCALE_FRAC,
   ENEMY_HP_EXP,
+  ENEMY_HP_EXP_LATE,
+  ENEMY_HP_EXP_LATE_WAVE,
   ENEMY_HP_EXP_WAVE,
   ENEMY_HP_LINEAR,
   ENEMY_SEPARATION_FORCE,
@@ -8,7 +10,9 @@ import {
   ENEMY_SPEED_PER_WAVE,
   ENEMY_SPEED_SCALE_MAX,
   MAX_ALIVE_BASE,
+  MAX_ALIVE_CEIL,
   MAX_ALIVE_PER_PLAYER,
+  MAX_ALIVE_PER_WAVE,
 } from '../config';
 import { sampleFlow, type FlowField } from './flowfield';
 import { norm } from './vec';
@@ -21,7 +25,12 @@ import type { EnemyState, EnemyType, GameState, PlayerState, SpawnZone, Wall } f
 export function enemyHpScale(wave: number): number {
   const w = Math.max(1, wave);
   const linear = 1 + ENEMY_HP_LINEAR * (Math.min(w, ENEMY_HP_EXP_WAVE) - 1);
-  return w <= ENEMY_HP_EXP_WAVE ? linear : linear * ENEMY_HP_EXP ** (w - ENEMY_HP_EXP_WAVE);
+  if (w <= ENEMY_HP_EXP_WAVE) return linear;
+  // waves 10..LATE compound at ×1.1 (the fun COD ramp); past LATE, soften to ×1.06
+  // so it never becomes an unkillable bullet-sponge wall.
+  const mid = Math.min(w, ENEMY_HP_EXP_LATE_WAVE) - ENEMY_HP_EXP_WAVE;
+  const late = Math.max(0, w - ENEMY_HP_EXP_LATE_WAVE);
+  return linear * ENEMY_HP_EXP ** mid * ENEMY_HP_EXP_LATE ** late;
 }
 
 /** Zombies speed up each wave (walkers → sprinters), capped so they stay kite-able. */
@@ -29,9 +38,13 @@ export function enemySpeedScale(wave: number): number {
   return Math.min(ENEMY_SPEED_SCALE_MAX, 1 + ENEMY_SPEED_PER_WAVE * (Math.max(1, wave) - 1));
 }
 
-/** COD max-on-screen cap: keeps the horde a relentless advancing stream, not a lag-bomb. */
-export function maxAlive(players: number): number {
-  return MAX_ALIVE_BASE + MAX_ALIVE_PER_PLAYER * Math.max(0, players - 1);
+/**
+ * Max-on-screen cap: a relentless advancing stream that GROWS each wave (denser
+ * late rounds) but never past a lag-safe ceiling.
+ */
+export function maxAlive(players: number, wave = 1): number {
+  const cap = MAX_ALIVE_BASE + MAX_ALIVE_PER_PLAYER * Math.max(0, players - 1) + Math.floor(Math.max(0, wave - 1) * MAX_ALIVE_PER_WAVE);
+  return Math.min(MAX_ALIVE_CEIL, cap);
 }
 
 export interface EnemyDef {

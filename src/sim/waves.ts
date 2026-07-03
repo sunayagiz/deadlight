@@ -4,6 +4,7 @@ import {
   DOG_ROUND_EVERY,
   DOG_ROUND_FIRST,
   EXTRACTION_WAVE,
+  GUARANTEED_AMMO_EVERY,
   FLASHLIGHT_HALF_ANGLE,
   FLASHLIGHT_RANGE,
   PERK_INTERVAL,
@@ -67,14 +68,42 @@ function affordable(index: number, budget: number): EnemyType[] {
   return pool.filter((t) => ZOMBIES[t].cost <= budget);
 }
 
-/** Spend the wave's budget on random affordable enemy rows to build a spawn queue. */
+/**
+ * Enemy-mix weighting: later waves lean toward faster/tankier types (shamblers
+ * fade, runners + brutes rise). This is the "harder but fair" lever — late-game
+ * threat from a nastier MIX, not just bullet-sponge HP.
+ */
+function weightFor(type: EnemyType, index: number): number {
+  switch (type) {
+    case 'shambler':
+      return Math.max(0.4, 3 - index * 0.12);
+    case 'runner':
+      return 1 + index * 0.12;
+    case 'brute':
+      return 0.3 + index * 0.06;
+    default:
+      return 1;
+  }
+}
+
+/** Spend the wave's budget on weighted affordable enemy rows to build a spawn queue. */
 export function buildWaveQueue(index: number, rng: Rng, squad = 1): EnemyType[] {
   let budget = Math.round(waveBudget(index) * (0.6 + 0.4 * squad)); // +40% per extra player
   const queue: EnemyType[] = [];
   for (;;) {
     const opts = affordable(index, budget);
     if (opts.length === 0) break;
-    const type = opts[Math.floor(rng() * opts.length) % opts.length];
+    const weights = opts.map((t) => weightFor(t, index));
+    const total = weights.reduce((s, w) => s + w, 0);
+    let r = rng() * total;
+    let type = opts[0];
+    for (let i = 0; i < opts.length; i++) {
+      r -= weights[i];
+      if (r <= 0) {
+        type = opts[i];
+        break;
+      }
+    }
     queue.push(type);
     budget -= ZOMBIES[type].cost;
   }
@@ -170,7 +199,7 @@ export function updateWaves(state: GameState, dt: number, rng: Rng = Math.random
   // COD max-on-screen cap: once the horde is at capacity, HOLD until kills free
   // a slot, so a big wave becomes a relentless advancing stream, not a lag-bomb.
   const squad = Math.max(1, state.players.filter((p) => p.alive).length);
-  const atCap = state.enemies.length >= maxAlive(squad);
+  const atCap = state.enemies.length >= maxAlive(squad, wave.index);
   wave.spawnCooldown -= dt;
   if (wave.spawnQueue.length > 0 && wave.spawnCooldown <= 0 && !atCap) {
     const zone = pickZone(state, rng, flow);
@@ -195,12 +224,14 @@ export function updateWaves(state: GameState, dt: number, rng: Rng = Math.random
 
   // wave is cleared once nothing is left to spawn and nothing is left alive
   if (wave.spawnQueue.length === 0 && state.enemies.length === 0) {
-    // clearing a hellhound round always drops a Max Ammo (COD guarantee)
-    if (state.dogRound) {
+    // Max Ammo guarantee: every hellhound round, plus every Nth wave otherwise
+    // (endless ammo sustain so a long run never dies to an empty reserve).
+    const dropAmmo = state.dogRound || wave.index % GUARANTEED_AMMO_EVERY === 0;
+    if (dropAmmo) {
       const at = state.players.find((p) => p.alive) ?? state.players[0];
       state.powerups.push({ id: state.nextPowerUpId++, kind: 'maxammo', x: at.pos.x, y: at.pos.y, ttl: POWERUP_TTL });
-      state.dogRound = false;
     }
+    state.dogRound = false;
     wave.index += 1;
     wave.phase = 'intermission';
     wave.timer = WAVE_INTERMISSION;

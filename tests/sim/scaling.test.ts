@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { ENEMY_SPEED_SCALE_MAX, MAX_ALIVE_BASE, MAX_ALIVE_PER_PLAYER, SIM_DT } from '../../src/config';
+import { ENEMY_SPEED_SCALE_MAX, MAX_ALIVE_BASE, MAX_ALIVE_CEIL, MAX_ALIVE_PER_PLAYER, SIM_DT } from '../../src/config';
 import { ZOMBIES, enemyHpScale, enemySpeedScale, maxAlive, spawnEnemy } from '../../src/sim/enemies';
 import { createGameState, emptyInput } from '../../src/sim/state';
 import { stepSim } from '../../src/sim/step';
+import { isFinalWave, updateWaves } from '../../src/sim/waves';
 import type { GameState } from '../../src/sim/types';
 
 function fresh(numPlayers = 1): GameState {
@@ -13,6 +14,8 @@ describe('COD-style scaling', () => {
   it('HP is unchanged on wave 1 and ramps every wave after', () => {
     expect(enemyHpScale(1)).toBe(1);
     expect(enemyHpScale(2)).toBeCloseTo(1.18);
+    // late-game soften: the wave 25→26 step is gentler than the 24→25 step
+    expect(enemyHpScale(26) - enemyHpScale(25)).toBeLessThan(enemyHpScale(25) - enemyHpScale(24));
     // strictly increasing
     for (let w = 1; w < 25; w++) expect(enemyHpScale(w + 1)).toBeGreaterThan(enemyHpScale(w));
     // compounds after the threshold: wave 10 grows faster than the linear step
@@ -45,6 +48,25 @@ describe('COD-style scaling', () => {
     expect(maxAlive(4)).toBe(MAX_ALIVE_BASE + 3 * MAX_ALIVE_PER_PLAYER);
   });
 
+  it('max-alive cap grows each wave up to a ceiling', () => {
+    expect(maxAlive(1, 1)).toBe(MAX_ALIVE_BASE);
+    expect(maxAlive(1, 10)).toBeGreaterThan(maxAlive(1, 1));
+    expect(maxAlive(1, 30)).toBeGreaterThan(maxAlive(1, 10));
+    expect(maxAlive(1, 9999)).toBe(MAX_ALIVE_CEIL); // capped for lag safety
+  });
+
+  it('is endless — no final wave, high rounds keep advancing', () => {
+    expect(isFinalWave(20)).toBe(false); // the old extraction end is gone
+    expect(isFinalWave(500)).toBe(false);
+    const s = fresh();
+    s.wave.index = 50;
+    s.wave.phase = 'active';
+    s.wave.spawnQueue = [];
+    s.enemies = [];
+    updateWaves(s, 0.1, () => 0.5); // cleared → advances rather than locking
+    expect(s.wave.index).toBe(51);
+  });
+
   it('never exceeds the max-alive cap even on a huge wave', () => {
     // spawn far from the (kept-alive) player so the horde accumulates before it arrives
     const s = createGameState([], [{ x: 3800, y: 3800 }], [], { x: 100, y: 100 }, { width: 4000, height: 4000 }, 1);
@@ -59,6 +81,6 @@ describe('COD-style scaling', () => {
       peak = Math.max(peak, s.enemies.length);
     }
     expect(peak).toBeGreaterThan(20); // it did flood
-    expect(peak).toBeLessThanOrEqual(maxAlive(1) + 1); // but never blew past the cap
+    expect(peak).toBeLessThanOrEqual(maxAlive(1, s.wave.index) + 1); // but never blew past the wave-scaled cap
   });
 });
