@@ -180,6 +180,10 @@ export class GameScene extends Phaser.Scene {
   // between-wave shop (Phaser-native, host-authoritative buys via InputCollector)
   private shopRoot!: Phaser.GameObjects.Container;
   private shopButtons: { bg: Phaser.GameObjects.Rectangle; label: Phaser.GameObjects.Text; item: number }[] = [];
+  // screen-space hit rects (manual hit-testing — Phaser input on a scrollFactor-0
+  // container mis-tests once the camera scrolls, so we test pointer.x/y ourselves)
+  private shopHit: { x0: number; y0: number; x1: number; y1: number; i: number }[] = [];
+  private draftHit: { x0: number; y0: number; x1: number; y1: number; i: number }[] = [];
   // perk draft overlay
   private draftRoot!: Phaser.GameObjects.Container;
   private draftCards: { bg: Phaser.GameObjects.Rectangle; title: Phaser.GameObjects.Text; body: Phaser.GameObjects.Text }[] = [];
@@ -434,6 +438,27 @@ export class GameScene extends Phaser.Scene {
     this.input.keyboard!.on('keydown-R', () => {
       if (this.state.gameOver) this.scene.restart();
     });
+
+    // Shop/perk clicks: hit-test the pointer in SCREEN space ourselves. Phaser's
+    // input mis-tests a scrollFactor-0 container once the camera scrolls, so the
+    // buttons never register — this path is camera-independent and reliable.
+    this.input.on('pointerdown', (p: Phaser.Input.Pointer) => this.handleUiClick(p.x, p.y));
+  }
+
+  private static hit(px: number, py: number, r: { x0: number; y0: number; x1: number; y1: number }): boolean {
+    return px >= r.x0 && px <= r.x1 && py >= r.y0 && py <= r.y1;
+  }
+
+  /** Route a click to a shop row or a perk card (screen-space). */
+  private handleUiClick(px: number, py: number): void {
+    if (this.state.gameOver) return;
+    if (this.state.perkDraft) {
+      for (const c of this.draftHit) if (GameScene.hit(px, py, c)) { this.inputCollector.requestPerk(c.i); return; }
+      return;
+    }
+    if (this.state.wave.phase === 'intermission') {
+      for (const c of this.shopHit) if (GameScene.hit(px, py, c)) { this.inputCollector.requestBuy(c.i); return; }
+    }
   }
 
   // ── circle pool (bullets + blood particles) ────────────────────────────────
@@ -479,13 +504,11 @@ export class GameScene extends Phaser.Scene {
     this.shopRoot.add([panel, title]);
     SHOP.forEach((item, i) => {
       const y = y0 + i * rowH;
-      const bg = this.add.rectangle(480, y, w, rowH - 4, 0x101a12).setStrokeStyle(1, 0x233).setInteractive({ useHandCursor: true });
+      const bg = this.add.rectangle(480, y, w, rowH - 4, 0x101a12).setStrokeStyle(1, 0x233);
       const label = this.add.text(x0 + 8, y - 7, '', { fontFamily: 'monospace', fontSize: '13px', color: '#cfe8d4' });
-      bg.on('pointerover', () => { bg.setFillStyle(0x16261a); this.pointerOverUI = true; });
-      bg.on('pointerout', () => { bg.setFillStyle(0x101a12); this.pointerOverUI = false; });
-      bg.on('pointerdown', () => this.inputCollector.requestBuy(i));
       this.shopRoot.add([bg, label]);
       this.shopButtons.push({ bg, label, item: i });
+      this.shopHit.push({ x0: 480 - w / 2, y0: y - rowH / 2, x1: 480 + w / 2, y1: y + rowH / 2, i });
     });
     const hint = this.add.text(480, y0 + SHOP.length * rowH + 6, 'click to buy', { fontFamily: 'monospace', fontSize: '11px', color: '#4d6b55' }).setOrigin(0.5);
     this.shopRoot.add(hint);
@@ -503,14 +526,12 @@ export class GameScene extends Phaser.Scene {
     const startX = 480 - total / 2;
     for (let i = 0; i < 3; i++) {
       const cx = startX + i * (cw + gap) + cw / 2;
-      const bg = this.add.rectangle(cx, 300, cw, 170, 0x0c140f, 0.98).setStrokeStyle(2, 0x3ea45a).setInteractive({ useHandCursor: true });
+      const bg = this.add.rectangle(cx, 300, cw, 170, 0x0c140f, 0.98).setStrokeStyle(2, 0x3ea45a);
       const t = this.add.text(cx, 250, '', { fontFamily: 'monospace', fontSize: '17px', color: '#cfe8d4', fontStyle: 'bold', align: 'center', wordWrap: { width: cw - 20 } }).setOrigin(0.5);
       const b = this.add.text(cx, 320, '', { fontFamily: 'monospace', fontSize: '13px', color: '#8fef9f', align: 'center', wordWrap: { width: cw - 24 } }).setOrigin(0.5);
-      bg.on('pointerover', () => { bg.setFillStyle(0x152016); this.pointerOverUI = true; });
-      bg.on('pointerout', () => { bg.setFillStyle(0x0c140f); this.pointerOverUI = false; });
-      bg.on('pointerdown', () => this.inputCollector.requestPerk(i));
       this.draftRoot.add([bg, t, b]);
       this.draftCards.push({ bg, title: t, body: b });
+      this.draftHit.push({ x0: cx - cw / 2, y0: 300 - 85, x1: cx + cw / 2, y1: 300 + 85, i });
     }
   }
 
@@ -666,9 +687,14 @@ export class GameScene extends Phaser.Scene {
 
   update(_time: number, deltaMs: number): void {
     const dt = deltaMs / 1000;
+    // pointer-over-UI (screen space) — suppresses firing while shopping/drafting
+    const ptr = this.input.activePointer;
+    const shopOpen = this.state.wave.phase === 'intermission' && !this.state.perkDraft && !this.state.gameOver;
+    this.pointerOverUI =
+      !!this.state.perkDraft || (shopOpen && ptr.x > 318 && ptr.x < 642 && ptr.y > 262 && ptr.y < 552);
     const input = this.inputCollector.sample();
     // don't fire the weapon when clicking a shop button or picking a perk
-    if (this.pointerOverUI || this.state.perkDraft) {
+    if (this.pointerOverUI) {
       input.fire = false;
       input.dash = false;
     }
@@ -1203,12 +1229,14 @@ export class GameScene extends Phaser.Scene {
     const open = this.state.wave.phase === 'intermission' && !this.state.perkDraft && !this.state.gameOver;
     this.shopRoot.setVisible(open);
     if (!open) return;
+    const ptr = this.input.activePointer;
     for (const b of this.shopButtons) {
       const item = SHOP[b.item];
       const afford = this.state.cash >= item.cost;
+      const hovered = GameScene.hit(ptr.x, ptr.y, this.shopHit[b.item]);
       b.label.setText(`${item.name}`.padEnd(20) + `$${item.cost}`);
       b.label.setColor(afford ? '#cfe8d4' : '#5a6b60');
-      b.bg.setAlpha(afford ? 1 : 0.5);
+      b.bg.setFillStyle(hovered ? 0x1c3323 : 0x101a12).setAlpha(afford ? 1 : 0.5);
     }
   }
 

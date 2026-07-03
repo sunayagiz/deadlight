@@ -70,7 +70,7 @@ export function stepSim(
   updateCombat(state, dt, rng);
   updatePowerups(state, dt); // pick up dropped power-ups
   updateLoot(state, dt);
-  updateWaves(state, dt, rng);
+  updateWaves(state, dt, rng, flow); // flow gates spawns to reachable (opened) rooms
   updateExtraction(state, dt); // final-wave escape objective / win condition
 
   if (state.players.every((p) => !p.alive)) state.gameOver = true; // whole squad down

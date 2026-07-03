@@ -18,6 +18,7 @@ import {
 } from '../config';
 import { setNotice } from './cod';
 import { ZOMBIES, maxAlive, spawnEnemy } from './enemies';
+import { sampleFlow, type FlowField } from './flowfield';
 import { mapSolids } from './map';
 import { rollDraft } from './perks';
 import { segmentClear } from './vision';
@@ -93,8 +94,12 @@ function angleDiff(a: number, b: number): number {
  * must not be right on top of a player, and it must not sit inside the
  * player's flashlight view (in cone + close + clear line of sight).
  */
-function zoneValid(state: GameState, z: SpawnZone): boolean {
+export function zoneValid(state: GameState, z: SpawnZone, flow?: FlowField): boolean {
   if ((z.minWave ?? 0) > state.wave.index) return false;
+  // Only spawn where zombies can actually REACH a player: a zone sealed behind a
+  // still-closed (unbought) door has no flow-field value, so it's rejected. This
+  // keeps the horde in the rooms you've opened — never trapped in a locked room.
+  if (flow && !sampleFlow(flow, z.x, z.y)) return false;
   const solids = mapSolids(state);
   // rejected if it's too close to, or inside the lit view of, ANY standing player
   for (const p of state.players) {
@@ -112,23 +117,25 @@ function zoneValid(state: GameState, z: SpawnZone): boolean {
 }
 
 /** A random valid zone, or null when every zone is currently watched/locked (caller retries). */
-function pickZone(state: GameState, rng: Rng): SpawnZone | null {
-  const valid = state.spawnZones.filter((z) => zoneValid(state, z));
+function pickZone(state: GameState, rng: Rng, flow?: FlowField): SpawnZone | null {
+  const valid = state.spawnZones.filter((z) => zoneValid(state, z, flow));
   if (valid.length === 0) return state.spawnZones.length === 0 ? { x: 24, y: 24 } : null;
   return valid[Math.floor(rng() * valid.length) % valid.length];
 }
 
-/** Least-bad zone for a boss entrance: unlocked and farthest from the squad's centroid. */
-function pickBossZone(state: GameState): SpawnZone {
+/** Least-bad zone for a boss entrance: reachable, unlocked, farthest from the squad's centroid. */
+function pickBossZone(state: GameState, flow?: FlowField): SpawnZone {
   const up = state.players.filter((p) => p.alive);
   const cx = up.reduce((s, p) => s + p.pos.x, 0) / (up.length || 1);
   const cy = up.reduce((s, p) => s + p.pos.y, 0) / (up.length || 1);
-  const eligible = state.spawnZones.filter((z) => (z.minWave ?? 0) <= state.wave.index);
-  const pool = eligible.length > 0 ? eligible : [{ x: 24, y: 24 }];
+  const eligible = state.spawnZones.filter(
+    (z) => (z.minWave ?? 0) <= state.wave.index && (!flow || sampleFlow(flow, z.x, z.y)),
+  );
+  const pool = eligible.length > 0 ? eligible : [{ x: cx || 24, y: cy || 24 }];
   return pool.reduce((a, b) => (Math.hypot(a.x - cx, a.y - cy) >= Math.hypot(b.x - cx, b.y - cy) ? a : b));
 }
 
-function startWave(state: GameState, rng: Rng): void {
+function startWave(state: GameState, rng: Rng, flow?: FlowField): void {
   const wave = state.wave;
   wave.phase = 'active';
   // budget scales with how many players are still in the fight
@@ -140,21 +147,21 @@ function startWave(state: GameState, rng: Rng): void {
   } else {
     wave.spawnQueue = buildWaveQueue(wave.index, rng, squad);
     if (isBossWave(wave.index)) {
-      spawnEnemy(state, bossForWave(wave.index), pickBossZone(state)); // boss enters alongside the wave
+      spawnEnemy(state, bossForWave(wave.index), pickBossZone(state, flow)); // boss enters alongside the wave
     }
   }
   wave.spawnCooldown = 0; // first enemy spawns on the next tick
   wave.killsThisWave = 0;
 }
 
-export function updateWaves(state: GameState, dt: number, rng: Rng = Math.random): void {
+export function updateWaves(state: GameState, dt: number, rng: Rng = Math.random, flow?: FlowField): void {
   if (state.gameOver) return;
   const wave = state.wave;
 
   if (wave.phase === 'intermission') {
     if (state.perkDraft) return; // a pending draft freezes the clock until someone picks
     wave.timer = Math.max(0, wave.timer - dt);
-    if (wave.timer <= 0) startWave(state, rng);
+    if (wave.timer <= 0) startWave(state, rng, flow);
     return;
   }
 
@@ -166,7 +173,7 @@ export function updateWaves(state: GameState, dt: number, rng: Rng = Math.random
   const atCap = state.enemies.length >= maxAlive(squad);
   wave.spawnCooldown -= dt;
   if (wave.spawnQueue.length > 0 && wave.spawnCooldown <= 0 && !atCap) {
-    const zone = pickZone(state, rng);
+    const zone = pickZone(state, rng, flow);
     if (zone) {
       const type = wave.spawnQueue.shift()!;
       spawnEnemy(state, type, zone);
