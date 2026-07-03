@@ -172,10 +172,10 @@ function buildInteractables(): Interactable[] {
   return [
     // Mystery Box — starts in the lobby, teleports between the homes on a teddy
     { kind: 'mysterybox', ...boxHomes[0], cost: 950, label: 'Mystery Box', boxUses: 0, homes: boxHomes },
-    // wall guns near the early rooms (cheap starting firepower + ammo)
-    { kind: 'wallbuy', ...P(62, 26), cost: 500, label: 'Shotgun', weapon: 'shotgun' },
-    { kind: 'wallbuy', ...P(10, 28), cost: 400, label: 'SMG', weapon: 'smg' },
-    { kind: 'wallbuy', ...P(132, 28), cost: 1000, label: 'Machine Gun', weapon: 'machinegun' },
+    // wall guns near the early rooms (a leg-up, but you must travel + pay)
+    { kind: 'wallbuy', ...P(62, 26), cost: 900, label: 'Shotgun', weapon: 'shotgun' },
+    { kind: 'wallbuy', ...P(10, 28), cost: 650, label: 'SMG', weapon: 'smg' },
+    { kind: 'wallbuy', ...P(132, 28), cost: 1600, label: 'Machine Gun', weapon: 'machinegun' },
     // power switch (sewer) gates the Pack-a-Punch
     { kind: 'power', ...P(70, 49), cost: 0, label: 'Power' },
     // Pack-a-Punch — deep in the generator room, needs power

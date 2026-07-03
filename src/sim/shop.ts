@@ -17,15 +17,17 @@ export interface ShopItem {
  * authoritative — they flow in through PlayerInput.buy so guests buy too. Buying
  * a weapon you own instead tops up its ammo.
  */
+// Utility (heal/ammo) stays cheap; weapons are deliberately pricey so you can't
+// vending-machine a full arsenal early — travel to wall-buys or gamble the Box.
 export const SHOP: ShopItem[] = [
   { id: 'heal', name: 'Medkit  +60 HP', cost: 90, kind: 'heal', amount: 60 },
   { id: 'ammo', name: 'Ammo Resupply', cost: 70, kind: 'ammo' },
-  { id: 'smg', name: 'SMG', cost: 140, kind: 'weapon', weapon: 'smg', amount: 0 },
-  { id: 'shotgun', name: 'Shotgun', cost: 170, kind: 'weapon', weapon: 'shotgun', amount: 0 },
-  { id: 'machinegun', name: 'Machine Gun', cost: 240, kind: 'weapon', weapon: 'machinegun', amount: 0 },
-  { id: 'chainsaw', name: 'Chainsaw  +300', cost: 260, kind: 'weapon', weapon: 'chainsaw', amount: 300 },
-  { id: 'minigun', name: 'Minigun  +400', cost: 360, kind: 'weapon', weapon: 'minigun', amount: 400 },
-  { id: 'rpg', name: 'RPG  +6', cost: 420, kind: 'weapon', weapon: 'rpg', amount: 6 },
+  { id: 'smg', name: 'SMG', cost: 320, kind: 'weapon', weapon: 'smg', amount: 0 },
+  { id: 'shotgun', name: 'Shotgun', cost: 450, kind: 'weapon', weapon: 'shotgun', amount: 0 },
+  { id: 'machinegun', name: 'Machine Gun', cost: 750, kind: 'weapon', weapon: 'machinegun', amount: 0 },
+  { id: 'chainsaw', name: 'Chainsaw  +300', cost: 700, kind: 'weapon', weapon: 'chainsaw', amount: 300 },
+  { id: 'minigun', name: 'Minigun  +400', cost: 1100, kind: 'weapon', weapon: 'minigun', amount: 400 },
+  { id: 'rpg', name: 'RPG  +6', cost: 1300, kind: 'weapon', weapon: 'rpg', amount: 6 },
 ];
 
 function grant(p: PlayerState, weapon: WeaponId, amount: number): void {
