@@ -14,7 +14,7 @@ function seq(values: number[]): () => number {
 function hostState() {
   const walls = [{ x: 0, y: 0, w: 10, h: 2000 }];
   const zones = [{ x: 400, y: 400 }];
-  const s = createGameState(walls, zones, [{ x: 300, y: 300, w: 24, h: 100, open: false, minWave: 0 }], { x: 500, y: 500 }, { width: 2000, height: 2000 }, 2);
+  const s = createGameState(walls, zones, [{ x: 300, y: 300, w: 24, h: 100, open: false, minWave: 0, cost: 0 }], { x: 500, y: 500 }, { width: 2000, height: 2000 }, 2);
   const rng = seq([0.1, 0.5, 0.9]);
   spawnEnemy(s, 'runner', { x: 450, y: 450 });
   const inputs = [emptyInput(), emptyInput()];

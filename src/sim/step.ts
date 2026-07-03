@@ -1,4 +1,5 @@
 import { updateBosses } from './bosses';
+import { updateCodTimers, updateInteractions, updatePowerups } from './cod';
 import { updateCombat } from './combat';
 import { updateRevives } from './coop';
 import { enemySpeedScale, updateEnemies } from './enemies';
@@ -31,6 +32,7 @@ export function stepSim(
   state.player = state.players[0]; // keep the solo/host alias live
   if (state.gameOver) return; // freeze the world on death; the scene shows the end state
 
+  updateCodTimers(state, dt); // Insta-Kill / Double Points / Fire Sale / notice timers
   updateDoors(state);
   const solids = mapSolids(state); // walls + still-closed doors
   const flow = getFlowField(state, solids); // multi-source: routes enemies to the nearest player
@@ -60,11 +62,13 @@ export function stepSim(
     }
   });
 
+  updateInteractions(state, list, rng); // pay-doors + Mystery Box / PaP / wall / power
   updateRevives(state, list, dt); // bleedout + teammate revives
   updateEnemies(state.enemies, state.players, solids, dt, flow, enemySpeedScale(state.wave.index));
   updateBosses(state, dt, rng);
   updateBullets(state, dt);
   updateCombat(state, dt, rng);
+  updatePowerups(state, dt); // pick up dropped power-ups
   updateLoot(state, dt);
   updateWaves(state, dt, rng);
   updateExtraction(state, dt); // final-wave escape objective / win condition

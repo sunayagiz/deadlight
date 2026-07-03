@@ -8,6 +8,7 @@ interface Keys {
   D: Phaser.Input.Keyboard.Key;
   SPACE: Phaser.Input.Keyboard.Key;
   SHIFT: Phaser.Input.Keyboard.Key;
+  F: Phaser.Input.Keyboard.Key; // interact / buy
 }
 
 /** The only place that touches raw keyboard/mouse. Everything downstream sees PlayerInput. */
@@ -19,7 +20,7 @@ export class InputCollector {
   private pendingPerk = -1; // perk-draft pick requested by the HUD since the last sample
 
   constructor(private scene: Phaser.Scene) {
-    this.keys = scene.input.keyboard!.addKeys('W,A,S,D,SPACE,SHIFT') as Keys;
+    this.keys = scene.input.keyboard!.addKeys('W,A,S,D,SPACE,SHIFT,F') as Keys;
     // Weapon switching is captured here as edge events, then folded into the
     // per-tick PlayerInput so it travels over the network like everything else.
     scene.input.keyboard!.on('keydown', (ev: KeyboardEvent) => {
@@ -63,6 +64,7 @@ export class InputCollector {
       weaponCycle: cycle,
       buy,
       perk,
+      use: Phaser.Input.Keyboard.JustDown(this.keys.F),
     };
   }
 }

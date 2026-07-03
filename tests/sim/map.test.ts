@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { PLAYER_RADIUS, SIM_DT } from '../../src/config';
+import { updateInteractions } from '../../src/sim/cod';
 import { buildMap, mapSolids, updateDoors } from '../../src/sim/map';
 import { updateMovement } from '../../src/sim/movement';
 import { createGameState, createPlayer, emptyInput } from '../../src/sim/state';
@@ -21,7 +22,8 @@ describe('map + doors', () => {
     expect(m.walls.length).toBeGreaterThan(50); // carved geometry decomposes into many rects
     expect(m.doors.length).toBeGreaterThanOrEqual(8);
     expect(m.doors.every((d) => !d.open)).toBe(true); // all start closed
-    expect(m.doors.some((d) => d.minWave >= 2)).toBe(true); // gates exist
+    expect(m.doors.some((d) => d.cost >= 750)).toBe(true); // pay-to-open gates exist
+    expect(m.interactables.length).toBeGreaterThanOrEqual(5); // box/PaP/wall/power buyables
     expect(m.spawnZones.some((z) => (z.minWave ?? 0) <= 1)).toBe(true); // wave-1 pressure exists
     expect(m.spawnZones.length).toBeGreaterThanOrEqual(10);
   });
@@ -52,9 +54,9 @@ describe('map + doors', () => {
     expect(withOneOpen).toBe(withClosed - 1);
   });
 
-  it('an interior door opens on proximity; far doors stay shut', () => {
+  it('a free interior door opens on proximity; far doors stay shut', () => {
     const s = bigMapState();
-    const d = s.doors.find((x) => x.minWave === 0)!;
+    const d = s.doors.find((x) => x.cost === 0)!;
     updateDoors(s); // player at lobby start, far from it
     expect(d.open).toBe(false);
     s.player.pos = { x: d.x + d.w / 2, y: d.y + d.h / 2 - 30 };
@@ -62,16 +64,19 @@ describe('map + doors', () => {
     expect(d.open).toBe(true);
   });
 
-  it('a gate door stays locked before its wave and opens after', () => {
+  it('a pay-door ignores proximity and only opens when bought with enough cash', () => {
     const s = bigMapState();
-    const gate = s.doors.find((x) => x.minWave === 2)!;
-    s.player.pos = { x: gate.x + gate.w / 2 + 30, y: gate.y + gate.h / 2 };
-    s.wave.index = 1;
+    const gate = s.doors.find((x) => x.cost > 0)!;
+    s.player.pos = { x: gate.x + gate.w / 2 + 20, y: gate.y + gate.h / 2 };
     updateDoors(s);
-    expect(gate.open).toBe(false); // locked: too early
-    s.wave.index = 2;
-    updateDoors(s);
-    expect(gate.open).toBe(true); // unlocked at its milestone
+    expect(gate.open).toBe(false); // proximity alone never opens a pay-door
+    s.cash = gate.cost - 1;
+    updateInteractions(s, [{ ...emptyInput(), use: true }], () => 0.5);
+    expect(gate.open).toBe(false); // can't afford it
+    s.cash = gate.cost + 50;
+    updateInteractions(s, [{ ...emptyInput(), use: true }], () => 0.5);
+    expect(gate.open).toBe(true); // bought
+    expect(s.cash).toBe(50); // charged exactly the door's cost
   });
 
   it('a closed door blocks movement like a wall', () => {

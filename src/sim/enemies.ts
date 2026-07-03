@@ -52,6 +52,8 @@ export const ZOMBIES: Record<EnemyType, EnemyDef> = {
   brute: { type: 'brute', name: 'Brute', hp: 220, speed: 42, radius: 20, contactDamage: 35, cost: 5 },
   bloater: { type: 'bloater', name: 'Bloater', hp: 900, speed: 40, radius: 30, contactDamage: 40, cost: 0, boss: true },
   screamer: { type: 'screamer', name: 'Screamer', hp: 650, speed: 72, radius: 26, contactDamage: 25, cost: 0, boss: true },
+  // Hellhound — fast, fragile, glowing; only in dog special rounds.
+  hound: { type: 'hound', name: 'Hellhound', hp: 45, speed: 178, radius: 12, contactDamage: 22, cost: 2 },
 };
 
 export function isBoss(type: EnemyType): boolean {

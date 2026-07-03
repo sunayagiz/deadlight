@@ -1,4 +1,5 @@
-import { BULLET_KNOCKBACK, CASH_BOSS, CASH_PER_KILL, PLAYER_RADIUS } from '../config';
+import { BULLET_KNOCKBACK, CASH_BOSS, CASH_PER_HIT, CASH_PER_KILL, PLAYER_RADIUS, POWERUP_DROP_CHANCE } from '../config';
+import { cashMult, dropPowerUp, rollPowerUp } from './cod';
 import { downPlayer } from './coop';
 import { ZOMBIES } from './enemies';
 import { dropLoot } from './loot';
@@ -106,9 +107,11 @@ export function updateCombat(state: GameState, dt: number, rng: () => number = M
     } else {
       const hit = firstEnemyHit(state, b);
       if (hit) {
-        hit.hp -= b.damage;
+        if (state.instaKillT > 0 && !hit.boss) hit.hp = 0; // Insta-Kill power-up
+        else hit.hp -= b.damage;
         hit.hitFlash = HIT_FLASH;
         applyLifesteal(state, state.players[b.owner], b.damage); // leech perk credit
+        if (hit.hp > 0) state.cash += Math.round(CASH_PER_HIT * cashMult(state)); // COD points-per-hit
         // Shove along the bullet's travel direction; heavier bodies budge less.
         const vlen = Math.hypot(b.vel.x, b.vel.y);
         if (vlen > 0) {
@@ -128,8 +131,9 @@ export function updateCombat(state: GameState, dt: number, rng: () => number = M
   }
   state.bullets = surviving;
 
-  // Clear the dead, tally kills, award cash, and let each corpse maybe drop loot.
+  // Clear the dead, tally kills, award cash, drop loot / power-ups.
   const greed = greedMult(state);
+  const cm = cashMult(state);
   const alive = [];
   for (const e of state.enemies) {
     if (e.hp > 0) {
@@ -137,8 +141,9 @@ export function updateCombat(state: GameState, dt: number, rng: () => number = M
     } else {
       state.wave.killsThisWave += 1;
       const bounty = ZOMBIES[e.type].boss ? CASH_BOSS : CASH_PER_KILL * ZOMBIES[e.type].cost;
-      state.cash += Math.round(bounty * greed);
+      state.cash += Math.round(bounty * greed * cm); // Double Points doubles kill cash too
       dropLoot(state, e.pos, rng);
+      if (rng() < POWERUP_DROP_CHANCE) dropPowerUp(state, e.pos.x, e.pos.y, rollPowerUp(rng));
     }
   }
   state.enemies = alive;

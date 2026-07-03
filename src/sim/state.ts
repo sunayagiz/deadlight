@@ -1,5 +1,5 @@
 import { PLAYER_MAX_HP, WAVE_INTERMISSION } from '../config';
-import type { Door, GameState, PlayerInput, PlayerState, SpawnZone, Wall } from './types';
+import type { Door, GameState, Interactable, PlayerInput, PlayerState, SpawnZone, Wall } from './types';
 
 export function createPlayer(x: number, y: number): PlayerState {
   return {
@@ -29,6 +29,7 @@ export function createGameState(
   dims: { width: number; height: number } = { width: 960, height: 540 },
   numPlayers = 1,
   extractPoint: { x: number; y: number } = { x: dims.width - 220, y: dims.height - 220 },
+  interactables: Interactable[] = [],
 ): GameState {
   // fan the co-op squad out slightly around the start so they don't stack
   const players = Array.from({ length: Math.max(1, numPlayers) }, (_, i) => {
@@ -65,6 +66,18 @@ export function createGameState(
     perkDraft: null,
     extractPoint: { ...extractPoint },
     extraction: null,
+    interactables: interactables.map((it) => ({ ...it })),
+    powerups: [],
+    nextPowerUpId: 1,
+    powerOn: false,
+    instaKillT: 0,
+    doublePtsT: 0,
+    fireSaleT: 0,
+    packed: {},
+    dogRound: false,
+    notice: '',
+    noticeT: 0,
+    boxReveal: null,
   };
 }
 
@@ -81,5 +94,6 @@ export function emptyInput(): PlayerInput {
     weaponCycle: 0,
     buy: -1,
     perk: -1,
+    use: false,
   };
 }

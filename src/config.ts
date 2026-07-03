@@ -68,6 +68,26 @@ export const ENEMY_SPEED_SCALE_MAX = 1.6; // speed cap so they stay catchable/ki
 export const MAX_ALIVE_BASE = 30; // concurrent enemy cap, solo (relentless stream, no lag-bomb)
 export const MAX_ALIVE_PER_PLAYER = 8; // +this many to the cap per extra player
 
+// --- COD-Zombies layer ---
+export const CASH_PER_HIT = 10; // COD: +10 points for a non-lethal damaging hit
+export const INTERACT_RADIUS = 90; // px: how close a player must be to use a buyable
+export const COST_MYSTERY_BOX = 950; // COD Mystery Box spin
+export const COST_MYSTERY_BOX_FIRESALE = 10; // Fire Sale price
+export const COST_PACK_A_PUNCH = 5000; // COD Pack-a-Punch
+export const COST_POWER = 0; // power switch is free to flip (a lever, not a purchase)
+export const BOX_TEDDY_MIN_USES = 3; // earliest spin the teddy can relocate the box
+export const BOX_TEDDY_CHANCE = 0.28; // per-spin chance (after the minimum) the box moves
+export const PAP_DMG_MULT = 2.0; // Pack-a-Punch damage multiplier
+export const PAP_AMMO_MULT = 2.0; // Pack-a-Punch reserve-ammo multiplier
+export const POWERUP_DROP_CHANCE = 0.03; // per kill chance to drop a power-up
+export const POWERUP_TTL = 18; // seconds a dropped power-up lasts
+export const POWERUP_MAX_ALIVE = 3; // cap concurrent drops (COD ~4/round)
+export const POWERUP_EFFECT_TIME = 30; // Insta-Kill / Double Points / Fire Sale duration
+export const NUKE_CASH = 400; // Nuke bonus to the squad
+export const DOG_ROUND_FIRST = 5; // earliest wave a hellhound round can occur
+export const DOG_ROUND_EVERY = 5; // roughly every Nth wave after that
+export const NOTICE_TIME = 2.6; // seconds an announcer line stays on screen
+
 // --- Run goal / extraction (win condition) ---
 export const EXTRACTION_WAVE = 20; // the final wave: reach + hold the exit to escape
 export const EXTRACT_HOLD = 14; // s a standing player must hold the extraction point

@@ -16,6 +16,7 @@ export interface PlayerInput {
   weaponCycle: number; // cycle owned weapons: -1 prev, +1 next, 0 none
   buy: number; // shop purchase index this tick (intermission only); -1 = none
   perk: number; // perk-draft choice this tick (0..PERK_CHOICES-1); -1 = none
+  use: boolean; // interact with the nearest buyable (door/box/PaP/wall/power) this tick
 }
 
 export type WeaponId =
@@ -27,7 +28,8 @@ export type WeaponId =
   | 'rpg'
   | 'katana'
   | 'bat'
-  | 'chainsaw';
+  | 'chainsaw'
+  | 'raygun'; // wonder weapon — Mystery Box only
 
 export type WeaponKind = 'gun' | 'rpg' | 'melee';
 
@@ -81,7 +83,33 @@ export interface LootState {
   ttl: number; // seconds before it despawns
 }
 
-export type EnemyType = 'shambler' | 'runner' | 'brute' | 'bloater' | 'screamer';
+export type EnemyType = 'shambler' | 'runner' | 'brute' | 'bloater' | 'screamer' | 'hound';
+
+/** A fixed buyable in the world (COD-style): doors, Mystery Box, Pack-a-Punch, wall guns, power. */
+export type InteractKind = 'mysterybox' | 'packapunch' | 'wallbuy' | 'power';
+
+export interface Interactable {
+  kind: InteractKind;
+  x: number;
+  y: number;
+  cost: number;
+  label: string;
+  weapon?: WeaponId; // wall-buy: the gun sold here
+  needsPower?: boolean; // Mystery Box / Pack-a-Punch stay dark until power is on
+  boxUses?: number; // Mystery Box: spins so far (drives the teddy-bear relocate)
+  homes?: { x: number; y: number }[]; // Mystery Box: the spots it can teleport between
+}
+
+export type PowerUpKind = 'maxammo' | 'instakill' | 'nuke' | 'doublepoints' | 'firesale';
+
+/** A dropped power-up the players run over (COD drops). */
+export interface PowerUp {
+  id: number;
+  kind: PowerUpKind;
+  x: number;
+  y: number;
+  ttl: number;
+}
 
 export type BossAttack = 'spew' | 'spit' | 'summon';
 
@@ -117,6 +145,7 @@ export interface Door {
   h: number;
   open: boolean;
   minWave: number; // 0 = interior door (always openable); gate doors unlock at this wave
+  cost: number; // 0 = auto-open on proximity; >0 = COD-style pay-to-open (needs `use`)
 }
 
 /** Where enemies enter the map. Never spawn on top of the players. */
@@ -168,4 +197,17 @@ export interface GameState {
   perkDraft: string[] | null; // 3 perk ids offered right now, or null when no draft is pending
   extractPoint: { x: number; y: number }; // static exit location (from the map; off-wire)
   extraction: ExtractionState | null; // live escape progress once the final wave begins
+  // ── COD-Zombies layer ──
+  interactables: Interactable[]; // fixed buyables (box / PaP / wall guns / power)
+  powerups: PowerUp[]; // dropped power-ups on the ground
+  nextPowerUpId: number;
+  powerOn: boolean; // has the power switch been flipped?
+  instaKillT: number; // seconds of Insta-Kill left (every hit one-shots)
+  doublePtsT: number; // seconds of Double Points left (all cash ×2)
+  fireSaleT: number; // seconds of Fire Sale left (Mystery Box costs 10)
+  packed: Record<string, boolean>; // weapon id → Pack-a-Punched?
+  dogRound: boolean; // is the current wave a hellhound special round?
+  notice: string; // transient announcer line ("MAX AMMO", "POWER ON", …)
+  noticeT: number; // seconds the notice stays up
+  boxReveal: { weapon: WeaponId; t: number } | null; // Mystery Box spin animation
 }

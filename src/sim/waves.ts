@@ -1,10 +1,13 @@
 import {
   BOSS_WAVE_INTERVAL,
   BRUTE_MIN_WAVE,
+  DOG_ROUND_EVERY,
+  DOG_ROUND_FIRST,
   EXTRACTION_WAVE,
   FLASHLIGHT_HALF_ANGLE,
   FLASHLIGHT_RANGE,
   PERK_INTERVAL,
+  POWERUP_TTL,
   SPAWN_MIN_DIST,
   SPAWN_RETRY,
   SPAWN_SIGHT_DIST,
@@ -13,11 +16,28 @@ import {
   WAVE_INTERMISSION,
   WAVE_SPAWN_INTERVAL,
 } from '../config';
+import { setNotice } from './cod';
 import { ZOMBIES, maxAlive, spawnEnemy } from './enemies';
 import { mapSolids } from './map';
 import { rollDraft } from './perks';
 import { segmentClear } from './vision';
 import type { EnemyType, GameState, SpawnZone } from './types';
+
+/** Hellhound special round: from DOG_ROUND_FIRST, every DOG_ROUND_EVERY-th wave (never on a boss/final wave). */
+export function isDogRound(index: number): boolean {
+  return (
+    index >= DOG_ROUND_FIRST &&
+    index % DOG_ROUND_EVERY === 0 &&
+    !isBossWave(index) &&
+    index < EXTRACTION_WAVE
+  );
+}
+
+/** A pack of hounds sized to the wave and squad. */
+export function buildDogPack(index: number, squad = 1): EnemyType[] {
+  const n = Math.round((6 + index * 0.8) * (0.7 + 0.3 * squad));
+  return Array.from({ length: n }, () => 'hound' as EnemyType);
+}
 
 /** The last wave is the escape: an endless horde while the squad reaches the exit. */
 export function isFinalWave(index: number): boolean {
@@ -113,12 +133,18 @@ function startWave(state: GameState, rng: Rng): void {
   wave.phase = 'active';
   // budget scales with how many players are still in the fight
   const squad = Math.max(1, state.players.filter((p) => p.alive).length);
-  wave.spawnQueue = buildWaveQueue(wave.index, rng, squad);
+  state.dogRound = isDogRound(wave.index);
+  if (state.dogRound) {
+    wave.spawnQueue = buildDogPack(wave.index, squad); // a fast glowing hound pack
+    setNotice(state, 'HELLHOUNDS');
+  } else {
+    wave.spawnQueue = buildWaveQueue(wave.index, rng, squad);
+    if (isBossWave(wave.index)) {
+      spawnEnemy(state, bossForWave(wave.index), pickBossZone(state)); // boss enters alongside the wave
+    }
+  }
   wave.spawnCooldown = 0; // first enemy spawns on the next tick
   wave.killsThisWave = 0;
-  if (isBossWave(wave.index)) {
-    spawnEnemy(state, bossForWave(wave.index), pickBossZone(state)); // boss enters alongside the wave
-  }
 }
 
 export function updateWaves(state: GameState, dt: number, rng: Rng = Math.random): void {
@@ -162,6 +188,12 @@ export function updateWaves(state: GameState, dt: number, rng: Rng = Math.random
 
   // wave is cleared once nothing is left to spawn and nothing is left alive
   if (wave.spawnQueue.length === 0 && state.enemies.length === 0) {
+    // clearing a hellhound round always drops a Max Ammo (COD guarantee)
+    if (state.dogRound) {
+      const at = state.players.find((p) => p.alive) ?? state.players[0];
+      state.powerups.push({ id: state.nextPowerUpId++, kind: 'maxammo', x: at.pos.x, y: at.pos.y, ttl: POWERUP_TTL });
+      state.dogRound = false;
+    }
     wave.index += 1;
     wave.phase = 'intermission';
     wave.timer = WAVE_INTERMISSION;

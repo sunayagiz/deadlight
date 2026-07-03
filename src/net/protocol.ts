@@ -3,9 +3,12 @@ import type {
   EnemyState,
   ExtractionState,
   GameState,
+  Interactable,
   LootState,
   PlayerState,
+  PowerUp,
   WaveState,
+  WeaponId,
 } from '../sim/types';
 
 /**
@@ -30,6 +33,17 @@ export interface Snapshot {
   perks: Record<string, number>;
   draft: string[] | null; // perkDraft
   extract: ExtractionState | null;
+  inter: Interactable[]; // buyables (mystery box moves, so send them)
+  pups: PowerUp[];
+  power: boolean;
+  ik: number; // instaKillT
+  dp: number; // doublePtsT
+  fs: number; // fireSaleT
+  packed: Record<string, boolean>;
+  dog: boolean;
+  notice: string;
+  noticeT: number;
+  boxR: { weapon: WeaponId; t: number } | null;
 }
 
 export function snapshot(s: GameState): Snapshot {
@@ -50,6 +64,17 @@ export function snapshot(s: GameState): Snapshot {
     perks: s.perks,
     draft: s.perkDraft,
     extract: s.extraction,
+    inter: s.interactables,
+    pups: s.powerups,
+    power: s.powerOn,
+    ik: s.instaKillT,
+    dp: s.doublePtsT,
+    fs: s.fireSaleT,
+    packed: s.packed,
+    dog: s.dogRound,
+    notice: s.notice,
+    noticeT: s.noticeT,
+    boxR: s.boxReveal,
   };
 }
 
@@ -74,6 +99,17 @@ export function applySnapshot(s: GameState, snap: Snapshot): void {
   s.perks = snap.perks;
   s.perkDraft = snap.draft;
   s.extraction = snap.extract;
+  s.interactables = snap.inter;
+  s.powerups = snap.pups;
+  s.powerOn = snap.power;
+  s.instaKillT = snap.ik;
+  s.doublePtsT = snap.dp;
+  s.fireSaleT = snap.fs;
+  s.packed = snap.packed;
+  s.dogRound = snap.dog;
+  s.notice = snap.notice;
+  s.noticeT = snap.noticeT;
+  s.boxReveal = snap.boxR;
 }
 
 // Wire messages

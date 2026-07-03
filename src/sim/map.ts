@@ -1,5 +1,5 @@
 import { DOOR_OPEN_RADIUS } from '../config';
-import type { Door, GameState, SpawnZone, Wall } from './types';
+import type { Door, GameState, Interactable, SpawnZone, Wall } from './types';
 
 export interface MapDef {
   width: number;
@@ -9,6 +9,7 @@ export interface MapDef {
   spawnZones: SpawnZone[];
   playerStart: { x: number; y: number };
   extractionPoint: { x: number; y: number }; // the escape exit (final wave win point)
+  interactables: Interactable[]; // COD buyables: Mystery Box / Pack-a-Punch / wall guns / power
 }
 
 // ── Carving engine ───────────────────────────────────────────────────────────
@@ -88,14 +89,14 @@ export function buildMap(): MapDef {
   const doors: Door[] = [];
 
   // horizontal neck (E/W passage) + a vertical door filling its full height
-  const hneck = (xL: number, xR: number, y0: number, y1: number, minWave: number): void => {
+  const hneck = (xL: number, xR: number, y0: number, y1: number, minWave: number, cost = 0): void => {
     c.rect(xL, y0, xR, y1);
-    doors.push({ x: px((xL + xR) / 2) - 12, y: px(y0), w: 24, h: px(y1 - y0), open: false, minWave });
+    doors.push({ x: px((xL + xR) / 2) - 12, y: px(y0), w: 24, h: px(y1 - y0), open: false, minWave, cost });
   };
   // vertical neck (N/S passage) + a horizontal door filling its full width
-  const vneck = (x0: number, x1: number, yT: number, yB: number, minWave: number): void => {
+  const vneck = (x0: number, x1: number, yT: number, yB: number, minWave: number, cost = 0): void => {
     c.rect(x0, yT, x1, yB);
-    doors.push({ x: px(x0), y: px((yT + yB) / 2) - 12, w: px(x1 - x0), h: 24, open: false, minWave });
+    doors.push({ x: px(x0), y: px((yT + yB) / 2) - 12, w: px(x1 - x0), h: 24, open: false, minWave, cost });
   };
 
   // ── chambers ──────────────────────────────────────────────────────────────
@@ -114,14 +115,15 @@ export function buildMap(): MapDef {
   c.rect(116, 52, 140, 62); // GENERATOR room (SE) — top row overlaps the sewer
 
   // ── necks + doors (each door fills its neck exactly) ────────────────────────
-  vneck(70, 74, 20, 24, 6); // D6 power: lobby ↔ hall
-  hneck(48, 58, 30, 33, 2); // D1: lobby ↔ west wing
-  hneck(86, 96, 30, 33, 2); // D2: lobby ↔ east wing
-  vneck(70, 74, 40, 46, 3); // D5: lobby ↔ sewer
-  vneck(10, 14, 20, 23, 0); // parking ↔ west wing
-  vneck(129, 133, 20, 23, 0); // warehouse ↔ east wing
-  vneck(24, 28, 42, 46, 3); // west wing ↔ sewer (loop, opens with the sewer)
-  vneck(116, 120, 42, 46, 3); // east wing ↔ sewer (loop)
+  // Pay-to-open doors (COD debris): buy your way deeper; interior connectors are free.
+  vneck(70, 74, 20, 24, 0, 1250); // D6: lobby ↔ hall (leads to power/PaP)
+  hneck(48, 58, 30, 33, 0, 750); // D1: lobby ↔ west wing
+  hneck(86, 96, 30, 33, 0, 750); // D2: lobby ↔ east wing
+  vneck(70, 74, 40, 46, 0, 1000); // D5: lobby ↔ sewer
+  vneck(10, 14, 20, 23, 0); // parking ↔ west wing (free interior)
+  vneck(129, 133, 20, 23, 0); // warehouse ↔ east wing (free interior)
+  vneck(24, 28, 42, 46, 0, 1000); // west wing ↔ sewer (loop)
+  vneck(116, 120, 42, 46, 0, 1000); // east wing ↔ sewer (loop)
   // cave + generator open directly into the sewer (organic mouths, no doors)
 
   // ── clutter (solid cover, de-boxes the rooms) ───────────────────────────────
@@ -159,7 +161,26 @@ export function buildMap(): MapDef {
     playerStart: { x: px(72) + 30, y: px(32) + 30 },
     // deep in the generator room (SE), reachable via the sewer — the run's exit
     extractionPoint: { x: px(130) + 30, y: px(57) + 30 },
+    interactables: buildInteractables(),
   };
+}
+
+/** COD buyables placed on open floor across the building. */
+function buildInteractables(): Interactable[] {
+  const P = (cx: number, cy: number) => ({ x: px(cx) + 30, y: px(cy) + 30 });
+  const boxHomes = [P(80, 28), P(20, 34), P(122, 34), P(72, 12)]; // lobby / wings / hall
+  return [
+    // Mystery Box — starts in the lobby, teleports between the homes on a teddy
+    { kind: 'mysterybox', ...boxHomes[0], cost: 950, label: 'Mystery Box', boxUses: 0, homes: boxHomes },
+    // wall guns near the early rooms (cheap starting firepower + ammo)
+    { kind: 'wallbuy', ...P(62, 26), cost: 500, label: 'Shotgun', weapon: 'shotgun' },
+    { kind: 'wallbuy', ...P(10, 28), cost: 400, label: 'SMG', weapon: 'smg' },
+    { kind: 'wallbuy', ...P(132, 28), cost: 1000, label: 'Machine Gun', weapon: 'machinegun' },
+    // power switch (sewer) gates the Pack-a-Punch
+    { kind: 'power', ...P(70, 49), cost: 0, label: 'Power' },
+    // Pack-a-Punch — deep in the generator room, needs power
+    { kind: 'packapunch', ...P(124, 57), cost: 5000, label: 'Pack-a-Punch', needsPower: true },
+  ];
 }
 
 /** Rects that currently block movement, bullets and sight: all walls + still-closed doors. */
@@ -178,6 +199,7 @@ export function mapSolids(state: GameState): Wall[] {
 export function updateDoors(state: GameState): void {
   for (const d of state.doors) {
     if (d.open) continue;
+    if (d.cost > 0) continue; // pay-doors open via `use` (see cod.ts), not proximity
     if (d.minWave > 0 && state.wave.index < d.minWave) continue; // still sealed
     const cx = d.x + d.w / 2;
     const cy = d.y + d.h / 2;

@@ -6,10 +6,12 @@ import {
   EXTRACTION_WAVE,
   FLASHLIGHT_HALF_ANGLE,
   FLASHLIGHT_RANGE,
+  INTERACT_RADIUS,
   PLAYER_MAX_HP,
   PLAYER_RADIUS,
   SIM_DT,
 } from '../config';
+import { interactCost, interactReady, nearestBuyable } from '../sim/cod';
 import { ZOMBIES, spawnEnemy } from '../sim/enemies';
 import { buildMap, mapSolids } from '../sim/map';
 import { PERKS, effectiveMaxHp, type PerkId } from '../sim/perks';
@@ -21,7 +23,7 @@ import { segmentClear } from '../sim/vision';
 import { updateAim } from '../sim/weapons';
 import { updateDash, updateMovement } from '../sim/movement';
 import { WEAPONS } from '../sim/weapons';
-import { isUp, type EnemyType, type GameState, type PlayerInput, type PlayerState } from '../sim/types';
+import { isUp, type Door, type EnemyType, type GameState, type PlayerInput, type PlayerState } from '../sim/types';
 
 /** Static base for runtime asset URLs so the build works under any deploy path. */
 const ASSET_BASE = import.meta.env.BASE_URL;
@@ -49,15 +51,25 @@ const COLORS = {
 /** All character art faces east (+x) at rotation 0 — same as aimAngle 0. */
 const ART_FACING = 0;
 
+/** COD interactable marker colours + floating power-up icon styles. */
+const KIND_COLOR: Record<string, number> = { mysterybox: 0xffcf4e, packapunch: 0xb060ff, wallbuy: 0x4ec6ff, power: 0xff5a5a };
+const PU_STYLE: Record<string, { c: number; s: string }> = {
+  maxammo: { c: 0x4ec6ff, s: 'MAX' },
+  instakill: { c: 0xff5a5a, s: 'INSTA' },
+  nuke: { c: 0xff8a3a, s: 'NUKE' },
+  doublepoints: { c: 0xffcf4e, s: 'x2' },
+  firesale: { c: 0x8affa0, s: 'SALE' },
+};
+
 const DEPTH_FLOOR = -3;
 const DEPTH_BLOOD = -2;
 const DEPTH_DARK = 10;
 const DEPTH_HUD = 20;
 
 const ASSETS = [
-  'player', 'shambler', 'runner', 'brute', 'bloater', 'screamer',
+  'player', 'shambler', 'runner', 'brute', 'bloater', 'screamer', 'hound',
   'wpn_pistol', 'wpn_smg', 'wpn_shotgun', 'wpn_machinegun', 'wpn_minigun',
-  'wpn_rpg', 'wpn_katana', 'wpn_bat', 'wpn_chainsaw',
+  'wpn_rpg', 'wpn_katana', 'wpn_bat', 'wpn_chainsaw', 'wpn_raygun',
   'crate', 'ammo', 'muzzle', 'explosion', 'rocket', 'blood',
   'floor', 'wall', 'door_closed', 'door_open',
   'light_glow', 'light_cone',
@@ -178,6 +190,13 @@ export class GameScene extends Phaser.Scene {
   private extractBarBack!: Phaser.GameObjects.Rectangle;
   private extractBarFill!: Phaser.GameObjects.Rectangle;
   private extractLabel!: Phaser.GameObjects.Text;
+  // COD layer render
+  private codMarkers: { icon: Phaser.GameObjects.Star; label: Phaser.GameObjects.Text }[] = [];
+  private codPrompt!: Phaser.GameObjects.Text; // screen-space "[F] buy …" line
+  private codNotice!: Phaser.GameObjects.Text; // announcer banner (MAX AMMO, POWER ON, …)
+  private codStatus!: Phaser.GameObjects.Text; // active power-up timers
+  private powerupNodes = new Map<number, { g: Phaser.GameObjects.Star; t: Phaser.GameObjects.Text }>();
+  private boxRevealIcon!: Phaser.GameObjects.Image;
 
   constructor() {
     super('game');
@@ -226,6 +245,7 @@ export class GameScene extends Phaser.Scene {
       { width: map.width, height: map.height },
       numPlayers,
       map.extractionPoint,
+      map.interactables,
     );
     if (session.role === 'guest') this.state.players.forEach((p, i) => (p.alive = i === this.localIndex));
 
@@ -265,6 +285,20 @@ export class GameScene extends Phaser.Scene {
     const debugCash = Number(qs.get('cash'));
     if (debugCash > 0) this.state.cash = debugCash;
     if (qs.has('perk')) this.state.perkDraft = ['damage', 'firerate', 'vigor'];
+    // ?cod: drop the player at the Mystery Box with cash, some power-ups, and a hound
+    if (qs.has('cod')) {
+      this.state.cash = 9999;
+      const box = this.state.interactables.find((it) => it.kind === 'mysterybox');
+      if (box) this.state.player.pos = { x: box.x - 20, y: box.y + 60 };
+      const kinds = ['maxammo', 'instakill', 'nuke', 'doublepoints', 'firesale'] as const;
+      kinds.forEach((k, i) =>
+        this.state.powerups.push({ id: this.state.nextPowerUpId++, kind: k, x: this.state.player.pos.x - 120 + i * 60, y: this.state.player.pos.y - 90, ttl: 999 }),
+      );
+      spawnEnemy(this.state, 'hound', { x: this.state.player.pos.x + 140, y: this.state.player.pos.y });
+      // active phase with a lone hound holds the wave open (no shop overlay)
+      this.state.wave.phase = 'active';
+      this.state.wave.spawnQueue = [];
+    }
 
     this.mapW = map.width;
     this.mapH = map.height;
@@ -382,6 +416,7 @@ export class GameScene extends Phaser.Scene {
 
     this.buildShopUI();
     this.buildDraftUI();
+    this.buildCodRender();
 
     // All sound (SFX + music) loads in the background now that the scene is up.
     this.loadAudioDeferred();
@@ -476,6 +511,115 @@ export class GameScene extends Phaser.Scene {
       bg.on('pointerdown', () => this.inputCollector.requestPerk(i));
       this.draftRoot.add([bg, t, b]);
       this.draftCards.push({ bg, title: t, body: b });
+    }
+  }
+
+  // ── COD layer: interactables / power-ups / announcer ────────────────────────
+  private buildCodRender(): void {
+    for (const it of this.state.interactables) {
+      const color = KIND_COLOR[it.kind] ?? 0xffffff;
+      const icon = this.add.star(it.x, it.y, 4, 6, 15, color, 0.9).setDepth(DEPTH_FLOOR + 0.7);
+      const label = this.add
+        .text(it.x, it.y - 28, it.label.toUpperCase(), { fontFamily: 'monospace', fontSize: '12px', color: '#cfe8d4', fontStyle: 'bold' })
+        .setOrigin(0.5)
+        .setDepth(DEPTH_HUD - 2);
+      this.codMarkers.push({ icon, label });
+    }
+    this.boxRevealIcon = this.add.image(0, 0, 'wpn_pistol').setDepth(DEPTH_HUD - 1).setVisible(false);
+    this.codPrompt = this.add
+      .text(480, 424, '', { fontFamily: 'monospace', fontSize: '16px', color: '#ffe08a', fontStyle: 'bold', backgroundColor: '#000a' })
+      .setOrigin(0.5).setScrollFactor(0).setDepth(DEPTH_HUD + 1).setPadding(7, 4, 7, 4).setVisible(false);
+    this.codNotice = this.add
+      .text(480, 120, '', { fontFamily: 'monospace', fontSize: '30px', color: '#ffcf4e', fontStyle: 'bold' })
+      .setOrigin(0.5).setScrollFactor(0).setDepth(DEPTH_HUD + 1).setVisible(false);
+    this.codStatus = this.add
+      .text(228, 16, '', { fontFamily: 'monospace', fontSize: '13px', color: '#8affbf', fontStyle: 'bold' })
+      .setScrollFactor(0).setDepth(DEPTH_HUD);
+  }
+
+  private nearestPayDoor(p: PlayerState): Door | null {
+    for (const d of this.state.doors) {
+      if (d.open || d.cost <= 0) continue;
+      const cx = d.x + d.w / 2;
+      const cy = d.y + d.h / 2;
+      const reach = INTERACT_RADIUS + Math.max(d.w, d.h) / 2;
+      if ((p.pos.x - cx) ** 2 + (p.pos.y - cy) ** 2 <= reach * reach) return d;
+    }
+    return null;
+  }
+
+  private updateCodRender(): void {
+    const s = this.state;
+    const lp = this.local();
+    // markers follow their interactable (the Mystery Box teleports); pulse; dim when power-gated
+    s.interactables.forEach((it, i) => {
+      const m = this.codMarkers[i];
+      if (!m) return;
+      const gated = !!it.needsPower && !s.powerOn;
+      m.icon.setPosition(it.x, it.y).setRotation(s.time * 1.5).setScale(1 + 0.12 * Math.sin(s.time * 4)).setAlpha(gated ? 0.3 : 0.9);
+      m.label.setPosition(it.x, it.y - 28).setAlpha(gated ? 0.4 : 0.95);
+    });
+    // Mystery Box reveal: pop the rolled weapon above the box
+    const box = s.interactables.find((it) => it.kind === 'mysterybox');
+    if (s.boxReveal && box) {
+      this.boxRevealIcon.setVisible(true).setTexture(`wpn_${s.boxReveal.weapon}`).setPosition(box.x, box.y - 44);
+      this.setSpriteHeight(this.boxRevealIcon, 30);
+    } else {
+      this.boxRevealIcon.setVisible(false);
+    }
+    // proximity buy prompt (nearest buyable, else a nearby pay-door)
+    const near = nearestBuyable(s, lp);
+    let prompt = '';
+    if (near) {
+      if (near.needsPower && !s.powerOn) prompt = `${near.label.toUpperCase()} — NEEDS POWER`;
+      else if (near.kind === 'power') prompt = s.powerOn ? '' : '[F] Turn on POWER';
+      else if (near.kind === 'packapunch' && s.packed[lp.weapon]) prompt = `${WEAPONS[lp.weapon].name} already upgraded`;
+      else if (interactReady(s, near) || near.kind === 'wallbuy' || near.kind === 'mysterybox')
+        prompt = `[F] ${near.label} — $${interactCost(s, near)}`;
+    } else {
+      const door = this.nearestPayDoor(lp);
+      if (door) prompt = `[F] Open Door — $${door.cost}`;
+    }
+    this.codPrompt.setText(prompt).setVisible(prompt !== '');
+    // announcer banner
+    if (s.noticeT > 0 && s.notice) this.codNotice.setText(s.notice).setVisible(true).setAlpha(Math.min(1, s.noticeT));
+    else this.codNotice.setVisible(false);
+    // active power-up timers + power state
+    const chips: string[] = [];
+    if (s.instaKillT > 0) chips.push(`INSTA-KILL ${Math.ceil(s.instaKillT)}s`);
+    if (s.doublePtsT > 0) chips.push(`x2 ${Math.ceil(s.doublePtsT)}s`);
+    if (s.fireSaleT > 0) chips.push(`FIRE SALE ${Math.ceil(s.fireSaleT)}s`);
+    if (s.powerOn) chips.push('POWER ON');
+    this.codStatus.setText(chips.join('   '));
+    // floating power-up pickups
+    this.syncPowerups();
+  }
+
+  private syncPowerups(): void {
+    const seen = new Set<number>();
+    const t = this.state.time;
+    for (const pu of this.state.powerups) {
+      seen.add(pu.id);
+      const style = PU_STYLE[pu.kind] ?? { c: 0xffffff, s: '?' };
+      let node = this.powerupNodes.get(pu.id);
+      if (!node) {
+        const g = this.add.star(pu.x, pu.y, 5, 7, 16, style.c, 0.95).setDepth(1);
+        const tx = this.add
+          .text(pu.x, pu.y, style.s, { fontFamily: 'monospace', fontSize: '10px', color: '#101010', fontStyle: 'bold' })
+          .setOrigin(0.5).setDepth(2);
+        node = { g, t: tx };
+        this.powerupNodes.set(pu.id, node);
+      }
+      const bob = Math.sin(t * 4 + pu.id) * 4;
+      node.g.setPosition(pu.x, pu.y + bob).setRotation(t * 2).setScale(1 + 0.15 * Math.sin(t * 6));
+      node.t.setPosition(pu.x, pu.y + bob);
+    }
+    for (const [id, n] of this.powerupNodes) {
+      if (!seen.has(id)) {
+        n.g.destroy();
+        n.t.destroy();
+        this.powerupNodes.delete(id);
+      }
     }
   }
 
@@ -1034,6 +1178,7 @@ export class GameScene extends Phaser.Scene {
     this.updateShopUI();
     this.updateDraftUI();
     this.updateExtractionHud(dt);
+    this.updateCodRender();
 
     if (this.state.gameOver && !this.overlay) {
       const won = this.state.won;
