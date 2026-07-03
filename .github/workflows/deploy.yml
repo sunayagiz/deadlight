@@ -4,7 +4,7 @@ name: Deploy to GitHub Pages
 # active branches; the live URL is https://<owner>.github.io/deadlight/.
 on:
   push:
-    branches: [main, feat/big-map]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
