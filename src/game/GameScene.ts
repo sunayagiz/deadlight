@@ -11,6 +11,7 @@ import {
   PLAYER_RADIUS,
   SIM_DT,
 } from '../config';
+import { AFFIXES } from '../sim/affix';
 import { interactCost, interactReady, nearestBuyable } from '../sim/cod';
 import { ZOMBIES, spawnEnemy } from '../sim/enemies';
 import { buildMap, mapSolids } from '../sim/map';
@@ -137,6 +138,8 @@ export class GameScene extends Phaser.Scene {
   private bulletShapes = new Map<number, Phaser.GameObjects.Arc>();
   private rocketSprites = new Map<number, Phaser.GameObjects.Image>();
   private enemySprites = new Map<number, Phaser.GameObjects.Image>();
+  private affixAuras = new Map<number, Phaser.GameObjects.Arc>(); // faint elite glow behind affixed enemies
+  private volatileIds = new Set<number>(); // volatile elites, so their death fires the boomer blast fx
   private lootSprites = new Map<number, Phaser.GameObjects.Image>();
   private bloodDecals: Phaser.GameObjects.Image[] = [];
   private explosiveBullets = new Map<number, { x: number; y: number }>();
@@ -1142,10 +1145,12 @@ export class GameScene extends Phaser.Scene {
       const live = new Set(this.state.enemies.map((e) => e.id));
       for (const id of this.smoothEnemy.keys()) if (!live.has(id)) this.smoothEnemy.delete(id);
     }
+    this.volatileIds.clear();
     this.syncSprites(
       this.enemySprites,
       this.state.enemies.map((e) => {
         const sp = guest ? this.smooth(this.smoothEnemy, e.id, e.pos.x, e.pos.y, dt) : e.pos;
+        if (e.affix === 'volatile') this.volatileIds.add(e.id); // detonates on death (like a boomer)
         return {
         id: e.id,
         x: sp.x,
@@ -1155,11 +1160,13 @@ export class GameScene extends Phaser.Scene {
         rotation: (e.vel.x || e.vel.y) ? Math.atan2(e.vel.y, e.vel.x) - ART_FACING : 0,
         visible: onScreen(e.pos.x, e.pos.y) && segmentClear(eye, e.pos, solids),
         tintFill: e.boss && e.boss.telegraph > 0 ? COLORS.telegraphTint : e.hitFlash > 0 ? 0xffffff : undefined,
+        // elite colour-code — hit-flash (tintFill) still wins so hits stay readable
+        tint: e.affix ? AFFIXES[e.affix].tint : undefined,
         wobble: e.boss ? 0.05 : 0.11, // shamble sway; heavier bodies sway less
         };
       }),
       (lastX, lastY, id, img) => {
-        if (img.texture.key === 'boomer') this.boomerExplode(lastX, lastY); // detonates on death
+        if (img.texture.key === 'boomer' || this.volatileIds.has(id)) this.boomerExplode(lastX, lastY); // detonates on death
         this.spawnGore(lastX, lastY); // pool + flying flesh/bone gibs
         // corpse: the sprite stays behind, blood-darkened, and slowly soaks away
         const corpse = this.add
@@ -1172,6 +1179,7 @@ export class GameScene extends Phaser.Scene {
         this.tweens.add({ targets: corpse, alpha: 0, duration: 11000, onComplete: () => corpse.destroy() });
       },
     );
+    this.syncAffixAuras(); // pulsing elite glow rings behind affixed enemies
 
     // Loot: weapon drops show the actual weapon, ammo shows the ammo box.
     this.syncSprites(
@@ -1321,6 +1329,36 @@ export class GameScene extends Phaser.Scene {
         this.cameras.main.shake(120, 0.006);
         this.lightPulses.push({ x: pos.x, y: pos.y, life: 0.28, max: 0.28, size: 340 }); // blast floods the room with light
         this.explosiveBullets.delete(id);
+      }
+    }
+  }
+
+  /**
+   * Faint pulsing aura behind each affixed (elite) enemy in its affix colour, so
+   * threats read at a glance. Rings track their enemy sprite (matching guest
+   * smoothing) and are pooled by enemy id — cleaned up when the enemy is gone.
+   */
+  private syncAffixAuras(): void {
+    const t = this.state.time;
+    const seen = new Set<number>();
+    for (const e of this.state.enemies) {
+      if (!e.affix) continue;
+      const img = this.enemySprites.get(e.id);
+      if (!img || !img.visible) continue; // no aura for enemies hidden in the dark
+      seen.add(e.id);
+      const tint = AFFIXES[e.affix].tint;
+      let ring = this.affixAuras.get(e.id);
+      if (!ring) {
+        ring = this.add.circle(img.x, img.y, ZOMBIES[e.type].radius * 1.9, tint, 0.16).setDepth(DEPTH_BLOOD + 0.5);
+        this.affixAuras.set(e.id, ring);
+      }
+      const pulse = 0.9 + 0.16 * Math.sin(t * 4 + e.id); // gentle breathe
+      ring.setPosition(img.x, img.y).setScale(pulse).setFillStyle(tint, 0.16);
+    }
+    for (const [id, ring] of this.affixAuras) {
+      if (!seen.has(id)) {
+        ring.destroy();
+        this.affixAuras.delete(id);
       }
     }
   }

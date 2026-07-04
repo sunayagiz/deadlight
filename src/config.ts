@@ -47,6 +47,15 @@ export const STALKER_LUNGE_SPEED = 470; // px/s during a lunge
 export const SPAWN_JITTER = 46; // px: random offset around a spawn zone so spawns don't stack
 export const ARMOR_MELEE_BONUS = 1.35; // melee damage multiplier vs armored enemies (melee is the answer)
 
+// --- Elite / affix modifiers (RoR2-style) ---
+// A fraction of spawned enemies carry an affix (see affix.ts). Chance is zero
+// through the early waves, then ramps up with the wave index toward a cap so
+// endless late rounds stay fresh without turning into an all-elite meat grinder.
+export const AFFIX_MIN_WAVE = 3; // no affixes before this wave (learn the base roster first)
+export const AFFIX_CHANCE_BASE = 0.08; // affix chance at AFFIX_MIN_WAVE
+export const AFFIX_CHANCE_PER_WAVE = 0.012; // added per wave past AFFIX_MIN_WAVE
+export const AFFIX_CHANCE_MAX = 0.35; // cap so most of the horde is still "normal"
+
 // --- Loot ---
 export const LOOT_DROP_CHANCE = 0.22; // chance a killed enemy drops something
 export const LOOT_TTL = 15; // s before a dropped item despawns

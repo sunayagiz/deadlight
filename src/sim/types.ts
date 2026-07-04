@@ -94,6 +94,12 @@ export type EnemyType =
   | 'stalker' // lean lurker that periodically lunges
   | 'armored'; // riot-plated: shrugs off bullets, cut down only by melee
 
+/**
+ * Elite modifier (Risk of Rain 2 style): a fraction of spawned enemies carry one,
+ * tweaking their stats and sometimes adding an on-death effect. Data lives in affix.ts.
+ */
+export type AffixId = 'swift' | 'tank' | 'volatile' | 'shielded' | 'vampiric';
+
 /** A fixed buyable in the world (COD-style): doors, Mystery Box, Pack-a-Punch, wall guns, power. */
 export type InteractKind = 'mysterybox' | 'packapunch' | 'wallbuy' | 'power';
 
@@ -138,6 +144,8 @@ export interface EnemyState {
   boss?: BossBrain; // present only on boss enemies
   cd?: number; // generic ability cooldown — spitter acid shot / stalker lunge
   lunge?: number; // stalker: seconds left in an active lunge (dash toward the player)
+  affix?: AffixId; // elite modifier (stats + on-death effect); absent = a normal enemy
+  maxHp?: number; // spawn HP (post-affix) — caps vampiric self-regen; present on affixed enemies
 }
 
 /** Axis-aligned solid rectangle. */

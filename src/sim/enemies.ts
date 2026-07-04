@@ -24,11 +24,12 @@ import {
   STALKER_LUNGE_SPEED,
   STALKER_LUNGE_TIME,
 } from '../config';
+import { affixHpMult, affixRegenPerSec, affixSpeedMult } from './affix';
 import { sampleFlow, type FlowField } from './flowfield';
 import { mapSolids } from './map';
 import { segmentClear } from './vision';
 import { norm } from './vec';
-import type { EnemyState, EnemyType, GameState, PlayerState, SpawnZone, Wall } from './types';
+import type { AffixId, EnemyState, EnemyType, GameState, PlayerState, SpawnZone, Wall } from './types';
 
 /**
  * COD-style HP ramp: linear through wave ENEMY_HP_EXP_WAVE, then compounding
@@ -94,7 +95,7 @@ export function isBoss(type: EnemyType): boolean {
   return ZOMBIES[type].boss === true;
 }
 
-export function spawnEnemy(state: GameState, type: EnemyType, zone: SpawnZone): EnemyState {
+export function spawnEnemy(state: GameState, type: EnemyType, zone: SpawnZone, affix?: AffixId): EnemyState {
   const def = ZOMBIES[type];
   // per-wave HP ramp; bosses (already huge) take a softer fraction of it
   const ramp = enemyHpScale(state.wave.index);
@@ -108,6 +109,13 @@ export function spawnEnemy(state: GameState, type: EnemyType, zone: SpawnZone): 
     hitFlash: 0,
     ...(def.boss ? { boss: { attackCd: 1.5, telegraph: 0, pending: null } } : {}),
   };
+  // Elite modifier: tag it and bake the HP multiplier in, remembering spawn HP so
+  // vampiric regen can't over-heal past it. maxHp is serialized (part of EnemyState).
+  if (affix) {
+    e.affix = affix;
+    e.hp = Math.round(e.hp * affixHpMult(e));
+    e.maxHp = e.hp;
+  }
   state.enemies.push(e);
   return e;
 }
@@ -154,10 +162,14 @@ export function updateEnemies(
     e.hitFlash = Math.max(0, e.hitFlash - dt);
     const def = ZOMBIES[e.type];
 
+    // Vampiric elites knit themselves back together (host-side), never past spawn HP.
+    const rps = affixRegenPerSec(e);
+    if (rps > 0 && e.hp > 0) e.hp = Math.min(e.maxHp ?? e.hp, e.hp + rps * dt);
+
     // Route via the flow field (handles rooms/doors, already multi-source); fall
     // back to straight seek toward the nearest player when off-grid/unreachable.
     const tp = nearest(e);
-    const spd = def.speed * speedScale; // per-wave ramp (COD: walkers → sprinters)
+    const spd = def.speed * speedScale * affixSpeedMult(e); // per-wave ramp + elite speed (swift/tank)
     const tdx = tp.pos.x - e.pos.x;
     const tdy = tp.pos.y - e.pos.y;
     const tdist = Math.hypot(tdx, tdy) || 1;

@@ -18,6 +18,7 @@ import {
   WAVE_INTERMISSION,
   WAVE_SPAWN_INTERVAL,
 } from '../config';
+import { rollAffix } from './affix';
 import { setNotice } from './cod';
 import { ZOMBIES, maxAlive, spawnEnemy } from './enemies';
 import { sampleFlow, type FlowField } from './flowfield';
@@ -230,7 +231,10 @@ export function updateWaves(state: GameState, dt: number, rng: Rng = Math.random
         y: zone.y + (rng() - 0.5) * 2 * SPAWN_JITTER,
         minWave: zone.minWave,
       };
-      spawnEnemy(state, type, jz);
+      // Elite roll (RoR2-style) for normal-wave enemies; hellhounds stay unmodified.
+      // Bosses never come through this queue, so they're skipped for free.
+      const affix = type === 'hound' ? undefined : rollAffix(wave.index, rng);
+      spawnEnemy(state, type, jz, affix);
       wave.spawnCooldown = WAVE_SPAWN_INTERVAL;
     } else {
       wave.spawnCooldown = SPAWN_RETRY;

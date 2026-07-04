@@ -1,4 +1,5 @@
 import { BOOMER_BLAST_DMG, BOOMER_BLAST_RADIUS, BULLET_KNOCKBACK, CASH_BOSS, CASH_PER_HIT, CASH_PER_KILL, PLAYER_RADIUS, POWERUP_DROP_CHANCE } from '../config';
+import { affixBulletResist, affixExplodesOnDeath } from './affix';
 import { cashMult, dropPowerUp, rollPowerUp } from './cod';
 import { downPlayer } from './coop';
 import { ZOMBIES } from './enemies';
@@ -28,7 +29,7 @@ function hurt(state: GameState, p: PlayerState, dmg: number): void {
   }
 }
 
-/** A dying boomer detonates: every standing player in the blast takes damage (dash dodges it). */
+/** A death detonation (boomer, or a volatile elite): every standing player in the blast takes damage (dash dodges it). */
 function boomerBlast(state: GameState, at: Vec2): void {
   const r2 = BOOMER_BLAST_RADIUS * BOOMER_BLAST_RADIUS;
   for (const p of state.players) {
@@ -77,7 +78,8 @@ function explode(state: GameState, at: Vec2, radius: number, damage: number, own
     const dx = e.pos.x - at.x;
     const dy = e.pos.y - at.y;
     if (dx * dx + dy * dy <= r2) {
-      const dealt = damage * (1 - (ZOMBIES[e.type].bulletResist ?? 0)); // armor resists blasts too
+      // armor resists blasts too, and a shielded elite stacks on top of that
+      const dealt = damage * (1 - (ZOMBIES[e.type].bulletResist ?? 0)) * (1 - affixBulletResist(e));
       e.hp -= dealt;
       e.hitFlash = HIT_FLASH;
       applyLifesteal(state, shooter, dealt);
@@ -119,8 +121,8 @@ export function updateCombat(state: GameState, dt: number, rng: () => number = M
     } else {
       const hit = firstEnemyHit(state, b);
       if (hit) {
-        // armored bodies shrug off bullets — melee is the answer
-        const dealt = b.damage * (1 - (ZOMBIES[hit.type].bulletResist ?? 0));
+        // armored bodies shrug off bullets — melee is the answer; shielded elites resist further
+        const dealt = b.damage * (1 - (ZOMBIES[hit.type].bulletResist ?? 0)) * (1 - affixBulletResist(hit));
         if (state.instaKillT > 0 && !hit.boss) hit.hp = 0; // Insta-Kill power-up ignores armor
         else hit.hp -= dealt;
         hit.hitFlash = HIT_FLASH;
@@ -158,7 +160,8 @@ export function updateCombat(state: GameState, dt: number, rng: () => number = M
       state.cash += Math.round(bounty * greed * cm); // Double Points doubles kill cash too
       dropLoot(state, e.pos, rng);
       if (rng() < POWERUP_DROP_CHANCE) dropPowerUp(state, e.pos.x, e.pos.y, rollPowerUp(rng));
-      if (e.type === 'boomer') boomerBlast(state, e.pos); // explodes on death — mind your kills
+      // Boomers and volatile elites detonate on death (same AoE) — mind your kills.
+      if (e.type === 'boomer' || affixExplodesOnDeath(e)) boomerBlast(state, e.pos);
     }
   }
   state.enemies = alive;
