@@ -50,6 +50,7 @@ export interface Snapshot {
   notice: string;
   noticeT: number;
   boxR: { weapon: WeaponId; t: number } | null;
+  int: number; // AI Director intensity 0..1 (B5 dynamic music reads it client-side)
 }
 
 export function snapshot(s: GameState): Snapshot {
@@ -86,6 +87,7 @@ export function snapshot(s: GameState): Snapshot {
     notice: s.notice,
     noticeT: s.noticeT,
     boxR: s.boxReveal,
+    int: s.intensity,
   };
 }
 
@@ -126,6 +128,7 @@ export function applySnapshot(s: GameState, snap: Snapshot): void {
   s.notice = snap.notice;
   s.noticeT = snap.noticeT;
   s.boxReveal = snap.boxR;
+  s.intensity = snap.int;
 }
 
 // Wire messages

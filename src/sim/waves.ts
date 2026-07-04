@@ -20,6 +20,7 @@ import {
 } from '../config';
 import { rollAffix } from './affix';
 import { setNotice } from './cod';
+import { directorCapMult, directorIntervalMult } from './director';
 import { ZOMBIES, maxAlive, spawnEnemy } from './enemies';
 import { sampleFlow, type FlowField } from './flowfield';
 import { mapSolids } from './map';
@@ -219,7 +220,12 @@ export function updateWaves(state: GameState, dt: number, rng: Rng = Math.random
   // COD max-on-screen cap: once the horde is at capacity, HOLD until kills free
   // a slot, so a big wave becomes a relentless advancing stream, not a lag-bomb.
   const squad = Math.max(1, state.players.filter((p) => p.alive).length);
-  const atCap = state.enemies.length >= maxAlive(squad, wave.index);
+  // AI Director wraps (never rewrites) the spawn gate: at peak it shrinks the
+  // effective concurrent cap and lengthens the interval so the squad isn't buried
+  // past a fair point; on the way down it opens a brief calmer window. The wave's
+  // budget/queue is untouched — this only reshapes WHEN enemies arrive.
+  const cap = Math.max(1, Math.floor(maxAlive(squad, wave.index) * directorCapMult(state)));
+  const atCap = state.enemies.length >= cap;
   wave.spawnCooldown -= dt;
   if (wave.spawnQueue.length > 0 && wave.spawnCooldown <= 0 && !atCap) {
     const zone = pickZone(state, flow);
@@ -235,7 +241,7 @@ export function updateWaves(state: GameState, dt: number, rng: Rng = Math.random
       // Bosses never come through this queue, so they're skipped for free.
       const affix = type === 'hound' ? undefined : rollAffix(wave.index, rng);
       spawnEnemy(state, type, jz, affix);
-      wave.spawnCooldown = WAVE_SPAWN_INTERVAL;
+      wave.spawnCooldown = WAVE_SPAWN_INTERVAL * directorIntervalMult(state);
     } else {
       wave.spawnCooldown = SPAWN_RETRY;
     }

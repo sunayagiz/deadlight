@@ -199,6 +199,17 @@ export interface ExtractionState {
   progress: number; // seconds held so far (0..EXTRACT_HOLD)
 }
 
+/**
+ * AI Director bookkeeping (host-internal pacing state). `intensity` itself lives
+ * on GameState (serialized, client-facing); this holds only the cross-tick state
+ * the Director needs to compute it. Not serialized — guests never run the sim.
+ */
+export interface DirectorState {
+  peaked: boolean; // crested DIRECTOR_PEAK and not yet relaxed (arms the post-peak calm window)
+  relaxT: number; // seconds left in the eased post-peak spawn window
+  hpRef: number; // standing-squad HP at the end of last tick (damage-this-tick baseline)
+}
+
 export type WavePhase = 'intermission' | 'active';
 
 export interface WaveState {
@@ -230,6 +241,8 @@ export interface GameState {
   spawnZones: SpawnZone[];
   walls: Wall[];
   doors: Door[];
+  intensity: number; // AI Director stress accumulator, 0..1 (serialized; B5 dynamic music reads it)
+  director: DirectorState; // host-internal Director pacing bookkeeping (not serialized)
   gameOver: boolean;
   won: boolean; // true = the squad escaped (extraction complete)
   totalKills: number; // running kill tally across all waves (drives the run score)

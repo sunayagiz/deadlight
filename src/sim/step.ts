@@ -1,6 +1,7 @@
 import { updateBosses } from './bosses';
 import { updateCodTimers, updateInteractions, updatePowerups } from './cod';
 import { updateCombat } from './combat';
+import { updateDirector } from './director';
 import { updateRevives } from './coop';
 import { enemySpeedScale, updateEnemies, updateRangedEnemies } from './enemies';
 import { updateExtraction } from './extraction';
@@ -82,7 +83,8 @@ export function stepSim(
   updateCombat(state, dt, rng);
   updatePowerups(state, dt); // pick up dropped power-ups
   updateLoot(state, dt);
-  updateWaves(state, dt, rng, flow); // flow gates spawns to reachable (opened) rooms
+  updateDirector(state, dt); // AI Director: read stress → intensity (throttle + drop bias read below)
+  updateWaves(state, dt, rng, flow); // flow gates spawns to reachable (opened) rooms; reads Director throttle
   updateExtraction(state, dt); // final-wave escape objective / win condition
 
   if (state.players.every((p) => !p.alive)) state.gameOver = true; // whole squad down

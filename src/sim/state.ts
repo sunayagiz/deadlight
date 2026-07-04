@@ -63,6 +63,8 @@ export function createGameState(
     spawnZones: [...spawnZones],
     walls: [...walls], // copy: each GameState must be an independent snapshot (netcode)
     doors: doors.map((d) => ({ ...d })),
+    intensity: 0,
+    director: { peaked: false, relaxT: 0, hpRef: players.reduce((s, p) => s + p.hp, 0) },
     gameOver: false,
     won: false,
     totalKills: 0,

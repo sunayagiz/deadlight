@@ -1,6 +1,7 @@
 import { BOOMER_BLAST_DMG, BOOMER_BLAST_RADIUS, BULLET_KNOCKBACK, CASH_BOSS, CASH_PER_HIT, CASH_PER_KILL, PLAYER_RADIUS, POWERUP_DROP_CHANCE } from '../config';
 import { affixBulletResist, affixExplodesOnDeath } from './affix';
 import { cashMult, dropPowerUp, rollPowerUp } from './cod';
+import { directorDropMult } from './director';
 import { downPlayer } from './coop';
 import { ZOMBIES } from './enemies';
 import { dropLoot } from './loot';
@@ -147,6 +148,9 @@ export function updateCombat(state: GameState, dt: number, rng: () => number = M
   // Clear the dead, tally kills, award cash, drop loot / power-ups.
   const greed = greedMult(state);
   const cm = cashMult(state);
+  // AI Director supply relief: when the squad is starved it biases drops upward.
+  // Same rng() draw as before (deterministic) — only the threshold moves.
+  const dropMult = directorDropMult(state);
   const alive = [];
   for (const e of state.enemies) {
     if (e.hp > 0) {
@@ -156,8 +160,8 @@ export function updateCombat(state: GameState, dt: number, rng: () => number = M
       state.totalKills += 1; // run-wide tally for the daily score
       const bounty = ZOMBIES[e.type].boss ? CASH_BOSS : CASH_PER_KILL * ZOMBIES[e.type].cost;
       state.cash += Math.round(bounty * greed * cm); // Double Points doubles kill cash too
-      dropLoot(state, e.pos, rng);
-      if (rng() < POWERUP_DROP_CHANCE) dropPowerUp(state, e.pos.x, e.pos.y, rollPowerUp(rng));
+      dropLoot(state, e.pos, rng, dropMult);
+      if (rng() < POWERUP_DROP_CHANCE * dropMult) dropPowerUp(state, e.pos.x, e.pos.y, rollPowerUp(rng));
       // Boomers and volatile elites detonate on death (same AoE) — mind your kills.
       if (e.type === 'boomer' || affixExplodesOnDeath(e)) boomerBlast(state, e.pos);
     }

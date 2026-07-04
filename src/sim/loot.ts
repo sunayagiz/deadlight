@@ -20,9 +20,13 @@ const LOOT_TABLE: LootTemplate[] = [
   { kind: 'health', amount: 55 },
 ];
 
-/** Maybe drop a loot item at a killed enemy's position. Consumes two rng draws. */
-export function dropLoot(state: GameState, pos: Vec2, rng: () => number): void {
-  if (rng() >= LOOT_DROP_CHANCE) return;
+/**
+ * Maybe drop a loot item at a killed enemy's position. Consumes two rng draws.
+ * `chanceMult` (AI Director supply bias) scales the drop threshold only — the
+ * same first rng() draw decides, so determinism (and draw count) is preserved.
+ */
+export function dropLoot(state: GameState, pos: Vec2, rng: () => number, chanceMult = 1): void {
+  if (rng() >= LOOT_DROP_CHANCE * chanceMult) return;
   const t = LOOT_TABLE[Math.floor(rng() * LOOT_TABLE.length) % LOOT_TABLE.length];
   state.loot.push({
     id: state.nextLootId++,

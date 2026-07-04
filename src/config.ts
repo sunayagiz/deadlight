@@ -117,6 +117,26 @@ export const MAX_ALIVE_PER_PLAYER = 8; // +this many to the cap per extra player
 export const MAX_ALIVE_PER_WAVE = 1.5; // +this many to the cap per wave cleared
 export const MAX_ALIVE_CEIL = 55; // hard ceiling (perf + fairness)
 
+// --- AI Director (L4D-style intensity pacing) ---
+// A single 0..1 stress value paces the horde: it RISES from live pressure
+// (nearby enemies + damage taken) and DECAYS toward calm, then wraps the
+// spawner (throttle at the peak, breathe on the way down) and biases supply
+// drops upward when the squad is genuinely starved. Everything is dt-driven and
+// rng-gated — no wall-clock — so seeded daily runs stay reproducible.
+export const DIRECTOR_PRESSURE_RADIUS = 260; // px: enemies this close to any standing player count as pressure
+export const DIRECTOR_PRESSURE_FULL = 8; // this many nearby enemies ⇒ full (1.0) pressure term
+export const DIRECTOR_DAMAGE_FULL = 12; // squad HP lost in ONE tick that ⇒ full (1.0) damage term
+export const DIRECTOR_RISE = 3.0; // approach rate toward a higher stress target (per second)
+export const DIRECTOR_DECAY = 0.6; // approach rate back toward calm when stress drops (per second — slower = lingering tension)
+export const DIRECTOR_PEAK = 0.85; // at/above this the Director throttles the spawner (build-up crested)
+export const DIRECTOR_RELAX = 0.55; // once it falls below this AFTER a peak, open a brief calm window
+export const DIRECTOR_RELAX_TIME = 5; // s of eased spawns after a peak so the squad can reposition/loot
+export const DIRECTOR_PEAK_CAP_MULT = 0.6; // × the concurrent max-alive cap while at peak (fewer on screen — not buried)
+export const DIRECTOR_PEAK_INTERVAL_MULT = 1.8; // × the spawn interval while at peak (arrivals slow down)
+export const DIRECTOR_RELAX_INTERVAL_MULT = 1.5; // × the spawn interval during the post-peak calm window
+export const DIRECTOR_STARVED_HP_FRAC = 0.35; // any standing player below this fraction of max HP ⇒ starved
+export const DIRECTOR_STARVED_DROP_MULT = 2.0; // × the power-up / loot drop chance while starved (capped, deterministic)
+
 // --- COD-Zombies layer ---
 export const CASH_PER_HIT = 10; // COD: +10 points for a non-lethal damaging hit
 export const INTERACT_RADIUS = 90; // px: how close a player must be to use a buyable
