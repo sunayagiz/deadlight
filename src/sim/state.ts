@@ -19,6 +19,7 @@ export function createPlayer(x: number, y: number): PlayerState {
     bleedout: 0,
     reviveProgress: 0,
     selfReviveCharges: SELF_REVIVE_CHARGES,
+    catalysts: 0,
   };
 }
 

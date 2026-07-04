@@ -1,4 +1,4 @@
-import { PLAYER_MAX_HP } from '../config';
+import { COST_WEAPON_CATALYST, PLAYER_MAX_HP } from '../config';
 import { effectiveMaxHp } from './perks';
 import { WEAPONS } from './weapons';
 import type { GameState, PlayerState, WeaponId } from './types';
@@ -7,7 +7,7 @@ export interface ShopItem {
   id: string;
   name: string;
   cost: number;
-  kind: 'heal' | 'ammo' | 'weapon';
+  kind: 'heal' | 'ammo' | 'weapon' | 'catalyst';
   weapon?: WeaponId; // for weapon buys
   amount?: number; // heal amount, or ammo granted for a weapon buy
 }
@@ -28,6 +28,9 @@ export const SHOP: ShopItem[] = [
   { id: 'chainsaw', name: 'Chainsaw  +300', cost: 700, kind: 'weapon', weapon: 'chainsaw', amount: 300 },
   { id: 'minigun', name: 'Minigun  +400', cost: 1100, kind: 'weapon', weapon: 'minigun', amount: 400 },
   { id: 'rpg', name: 'RPG  +6', cost: 1300, kind: 'weapon', weapon: 'rpg', amount: 6 },
+  // A6 — the evolution gate: grants one catalyst token, spent at Pack-a-Punch to
+  // evolve a PaP'd weapon into its super-form. Deliberately the priciest buy.
+  { id: 'catalyst', name: 'Weapon Catalyst', cost: COST_WEAPON_CATALYST, kind: 'catalyst' },
 ];
 
 function grant(p: PlayerState, weapon: WeaponId, amount: number): void {
@@ -59,6 +62,8 @@ export function buy(state: GameState, pi: number, index: number): boolean {
     p.hp = Math.min(max, p.hp + (item.amount ?? PLAYER_MAX_HP));
   } else if (item.kind === 'ammo') {
     resupply(p);
+  } else if (item.kind === 'catalyst') {
+    p.catalysts += 1; // one token per purchase; spent later at Pack-a-Punch
   } else {
     const w = item.weapon!;
     const limited = WEAPONS[w].startAmmo !== undefined;

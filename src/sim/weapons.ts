@@ -42,7 +42,41 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
   chainsaw: { id: 'chainsaw', name: 'Chainsaw', kind: 'melee', damage: 60, fireRate: 1, range: 52, arc: 0.6, hold: true, startAmmo: 300 },
   // Wonder weapon — energy pistol with a nasty splash; Mystery Box only.
   raygun: { id: 'raygun', name: 'Ray Gun', kind: 'gun', damage: 110, fireRate: 4, bulletSpeed: 820, bulletTtl: 1.2, pellets: 1, spread: 0.02, splashRadius: 55, splashDamage: 70, startAmmo: 160, recoil: 2 },
+  // ── Evolved super-weapons (A6) — reachable only via EVOLUTIONS at Pack-a-Punch.
+  // Each is a qualitatively different super-version of its base, not just bigger
+  // numbers, and stays gated by limited ammo so it never fully replaces the arsenal.
+  // Wunderwaffe: the Ray Gun taken to its logical extreme — a huge energy blast that
+  // detonates in a wide chain-splash, clearing whole packs, but on a scarcer reserve.
+  wunderwaffe: { id: 'wunderwaffe', name: 'Wunderwaffe', kind: 'gun', damage: 220, fireRate: 3, bulletSpeed: 900, bulletTtl: 1.3, pellets: 1, spread: 0.01, splashRadius: 150, splashDamage: 180, startAmmo: 120, recoil: 2.8 },
+  // Dragon's Breath: incendiary flak — twelve searing pellets that each leave a small
+  // burning splash, so a single blast melts a crowd instead of a lone zombie.
+  dragonsbreath: { id: 'dragonsbreath', name: "Dragon's Breath", kind: 'gun', damage: 30, fireRate: 1.7, bulletSpeed: 880, bulletTtl: 0.45, pellets: 12, spread: 0.42, splashRadius: 45, splashDamage: 26, startAmmo: 96, recoil: 3.2 },
+  // Death Machine: the Minigun with the brakes cut — near-instant spin-up, a firehose
+  // rate, and a cavernous reserve. Pure suppression.
+  deathmachine: { id: 'deathmachine', name: 'Death Machine', kind: 'gun', damage: 30, fireRate: 28, bulletSpeed: 1150, bulletTtl: 0.95, spread: 0.09, spinUpTime: 0.35, startAmmo: 900, recoil: 2.1 },
 };
+
+/**
+ * Evolution recipe table (A6 — Vampire-Survivors-style builds). A Pack-a-Punched
+ * BASE weapon plus a spent catalyst evolves into RESULT. Pure data; the evolve
+ * itself is resolved host-authoritatively at the Pack-a-Punch machine (cod.ts).
+ */
+export interface Evolution {
+  base: WeaponId;
+  result: WeaponId;
+  name: string; // display name of the evolved form (for prompts / callouts)
+}
+
+export const EVOLUTIONS: Evolution[] = [
+  { base: 'raygun', result: 'wunderwaffe', name: WEAPONS.wunderwaffe.name },
+  { base: 'shotgun', result: 'dragonsbreath', name: WEAPONS.dragonsbreath.name },
+  { base: 'minigun', result: 'deathmachine', name: WEAPONS.deathmachine.name },
+];
+
+/** The evolution available for a base weapon id, or undefined if it has none. */
+export function evolutionFor(base: WeaponId): Evolution | undefined {
+  return EVOLUTIONS.find((e) => e.base === base);
+}
 
 export function updateAim(p: PlayerState, input: PlayerInput): void {
   p.aimAngle = Math.atan2(input.aimWorldY - p.pos.y, input.aimWorldX - p.pos.x);

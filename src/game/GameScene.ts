@@ -13,7 +13,7 @@ import {
   SIM_DT,
 } from '../config';
 import { AFFIXES, affixExplodesOnDeath } from '../sim/affix';
-import { interactCost, interactReady, nearestBuyable } from '../sim/cod';
+import { evolutionReady, interactCost, interactReady, nearestBuyable } from '../sim/cod';
 import { ZOMBIES, spawnEnemy } from '../sim/enemies';
 import { buildMap, mapSolids } from '../sim/map';
 import { PERKS, effectiveMaxHp, rerollCost, type PerkId } from '../sim/perks';
@@ -29,7 +29,7 @@ import { segmentClear } from '../sim/vision';
 import { updateAim } from '../sim/weapons';
 import { updateDash, updateMovement } from '../sim/movement';
 import { WEAPONS } from '../sim/weapons';
-import { isUp, type Door, type EnemyType, type GameState, type PlayerInput, type PlayerState } from '../sim/types';
+import { isUp, type Door, type EnemyType, type GameState, type PlayerInput, type PlayerState, type WeaponId } from '../sim/types';
 
 /** Static base for runtime asset URLs so the build works under any deploy path. */
 const ASSET_BASE = import.meta.env.BASE_URL;
@@ -59,6 +59,23 @@ const COLORS = {
 
 /** All character art faces east (+x) at rotation 0 — same as aimAngle 0. */
 const ART_FACING = 0;
+
+/**
+ * A6 — evolved weapons ship NO new art. Each renders as its BASE weapon's
+ * `wpn_<base>` sprite under a distinct tint, so the held sprite / HUD icon / box
+ * reveal never try to load a missing `wpn_<evolvedid>` texture. Render-only.
+ */
+const WEAPON_SKIN: Partial<Record<WeaponId, { base: WeaponId; tint: number }>> = {
+  wunderwaffe: { base: 'raygun', tint: 0x66ccff }, // electric blue
+  dragonsbreath: { base: 'shotgun', tint: 0xff7a1a }, // incendiary orange
+  deathmachine: { base: 'minigun', tint: 0xffe14a }, // molten gold
+};
+
+/** Texture key + tint for a weapon id (evolved ids fall back to their base sprite). */
+function weaponSkin(id: WeaponId): { key: string; tint: number | null } {
+  const s = WEAPON_SKIN[id];
+  return { key: `wpn_${s ? s.base : id}`, tint: s ? s.tint : null };
+}
 
 /** COD interactable marker colours + floating power-up icon styles. */
 const KIND_COLOR: Record<string, number> = { mysterybox: 0xffcf4e, packapunch: 0xb060ff, wallbuy: 0x4ec6ff, power: 0xff5a5a };
@@ -703,7 +720,10 @@ export class GameScene extends Phaser.Scene {
     // Mystery Box reveal: pop the rolled weapon above the box
     const box = s.interactables.find((it) => it.kind === 'mysterybox');
     if (s.boxReveal && box) {
-      this.boxRevealIcon.setVisible(true).setTexture(`wpn_${s.boxReveal.weapon}`).setPosition(box.x, box.y - 44);
+      const skin = weaponSkin(s.boxReveal.weapon);
+      this.boxRevealIcon.setVisible(true).setTexture(skin.key).setPosition(box.x, box.y - 44);
+      if (skin.tint !== null) this.boxRevealIcon.setTint(skin.tint);
+      else this.boxRevealIcon.clearTint();
       this.setSpriteHeight(this.boxRevealIcon, 30);
     } else {
       this.boxRevealIcon.setVisible(false);
@@ -712,8 +732,10 @@ export class GameScene extends Phaser.Scene {
     const near = nearestBuyable(s, lp);
     let prompt = '';
     if (near) {
+      const evo = near.kind === 'packapunch' ? evolutionReady(s, lp) : undefined;
       if (near.needsPower && !s.powerOn) prompt = `${near.label.toUpperCase()} — NEEDS POWER`;
       else if (near.kind === 'power') prompt = s.powerOn ? '' : '[F] Turn on POWER';
+      else if (evo) prompt = `[F] EVOLVE — ${evo.name}`;
       else if (near.kind === 'packapunch' && s.packed[lp.weapon]) prompt = `${WEAPONS[lp.weapon].name} already upgraded`;
       else if (interactReady(s, near) || near.kind === 'wallbuy' || near.kind === 'mysterybox')
         prompt = `[F] ${near.label} — $${interactCost(s, near)}`;
@@ -1284,11 +1306,14 @@ export class GameScene extends Phaser.Scene {
       }
       const wdef = WEAPONS[src.weapon];
       const hand = wdef.kind === 'melee' ? 6 : 13;
+      const wskin = weaponSkin(src.weapon);
       wpn
         .setVisible(!src.downed)
-        .setTexture(`wpn_${src.weapon}`)
+        .setTexture(wskin.key)
         .setPosition(px + kx + Math.cos(src.aimAngle) * hand, py + ky + Math.sin(src.aimAngle) * hand)
         .setRotation(src.aimAngle);
+      if (wskin.tint !== null) wpn.setTint(wskin.tint);
+      else wpn.clearTint();
       this.setSpriteHeight(wpn, wdef.kind === 'melee' ? 26 : 20);
 
       // downed → pulsing revive ring showing progress
@@ -1492,9 +1517,14 @@ export class GameScene extends Phaser.Scene {
 
     const ammo = def.startAmmo === undefined ? '∞' : String(Math.ceil(lp.ammo[def.id] ?? 0));
     const slots = lp.owned.map((id, i) => `${i + 1}:${WEAPONS[id].name}${id === lp.weapon ? '*' : ''}`).join('  ');
-    this.weaponIcon.setTexture(`wpn_${lp.weapon}`);
+    const hudSkin = weaponSkin(lp.weapon);
+    this.weaponIcon.setTexture(hudSkin.key);
+    if (hudSkin.tint !== null) this.weaponIcon.setTint(hudSkin.tint);
+    else this.weaponIcon.clearTint();
     this.setSpriteHeight(this.weaponIcon, 34);
-    this.weaponHud.setText(`${def.name}  [${ammo}]     ${slots}`);
+    // A6 — show unspent catalysts so the player knows an evolution is fuelled.
+    const cat = lp.catalysts > 0 ? `   ◈x${lp.catalysts}` : '';
+    this.weaponHud.setText(`${def.name}  [${ammo}]${cat}     ${slots}`);
 
     const boss = this.state.enemies.find((e) => e.boss);
     if (boss) {

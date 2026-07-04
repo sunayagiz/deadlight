@@ -148,6 +148,10 @@ export const BOX_TEDDY_MIN_USES = 3; // earliest spin the teddy can relocate the
 export const BOX_TEDDY_CHANCE = 0.28; // per-spin chance (after the minimum) the box moves
 export const PAP_DMG_MULT = 2.0; // Pack-a-Punch damage multiplier
 export const PAP_AMMO_MULT = 2.0; // Pack-a-Punch reserve-ammo multiplier
+// A6 — Weapon Evolutions. A catalyst is the gate for turning a Pack-a-Punched
+// weapon into its evolved super-form. Pricey on purpose: the catalyst + a prior
+// PaP (5000) are the whole cost, so the evolve at the machine itself is free.
+export const COST_WEAPON_CATALYST = 2500; // shop price of one Weapon Catalyst token
 export const POWERUP_DROP_CHANCE = 0.04; // per kill chance to drop a power-up (ammo sustain for long runs)
 export const POWERUP_TTL = 18; // seconds a dropped power-up lasts
 export const POWERUP_MAX_ALIVE = 3; // cap concurrent drops (COD ~4/round)

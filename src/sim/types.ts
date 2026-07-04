@@ -45,7 +45,12 @@ export type WeaponId =
   | 'katana'
   | 'bat'
   | 'chainsaw'
-  | 'raygun'; // wonder weapon — Mystery Box only
+  | 'raygun' // wonder weapon — Mystery Box only
+  // ── Evolved super-weapons (A6): a Pack-a-Punched base + a catalyst evolves here.
+  // Not sold or box-rolled directly; only reachable through the evolution recipe.
+  | 'wunderwaffe' // raygun evolved — chain-splash energy cannon
+  | 'dragonsbreath' // shotgun evolved — incendiary flak that clears crowds
+  | 'deathmachine'; // minigun evolved — a walking wall of lead
 
 export type WeaponKind = 'gun' | 'rpg' | 'melee';
 
@@ -72,6 +77,7 @@ export interface PlayerState {
   bleedout: number; // seconds left before a downed player dies
   reviveProgress: number; // 0..1 while a teammate (or a solo self-revive) is reviving this one
   selfReviveCharges: number; // solo "Quick Revive" charges left; a downed solo player self-revives while >0
+  catalysts: number; // A6: unspent Weapon Catalyst tokens — each fuels one weapon evolution at Pack-a-Punch (serialized wholesale with the player)
 }
 
 /** A player is a live combat threat only while up. */

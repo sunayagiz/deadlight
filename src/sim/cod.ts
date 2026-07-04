@@ -13,7 +13,7 @@ import {
   POWERUP_MAX_ALIVE,
   POWERUP_TTL,
 } from '../config';
-import { WEAPONS } from './weapons';
+import { evolutionFor, WEAPONS, type Evolution } from './weapons';
 import { isUp, type GameState, type Interactable, type PlayerInput, type PlayerState, type PowerUpKind, type WeaponId } from './types';
 import type { Rng } from './waves';
 
@@ -134,6 +134,35 @@ function grantWeapon(state: GameState, p: PlayerState, id: WeaponId): void {
   p.weapon = id;
 }
 
+/**
+ * A6 — is the player standing at Pack-a-Punch able to EVOLVE their held weapon
+ * right now? Requires the held weapon to already be Pack-a-Punched, to have an
+ * evolution recipe, and the player to hold at least one catalyst.
+ */
+export function evolutionReady(state: GameState, p: PlayerState): Evolution | undefined {
+  if (!state.packed[p.weapon] || p.catalysts < 1) return undefined;
+  return evolutionFor(p.weapon);
+}
+
+/**
+ * Consume one catalyst and replace the held (already-PaP'd) weapon with its
+ * evolved super-form: swap it in `owned`, equip it, grant its starting reserve
+ * (doubled, since the evolved form is born Pack-a-Punched), and mark it packed.
+ * Free at the machine — the catalyst + the prior PaP were the whole cost.
+ */
+function evolveWeapon(state: GameState, p: PlayerState, evo: Evolution): void {
+  const result = evo.result;
+  const def = WEAPONS[result];
+  const i = p.owned.indexOf(evo.base);
+  if (i >= 0) p.owned[i] = result;
+  else if (!p.owned.includes(result)) p.owned.push(result);
+  p.weapon = result;
+  p.catalysts -= 1;
+  state.packed[result] = true; // the super-form is Pack-a-Punched from birth
+  if (def.startAmmo !== undefined) p.ammo[result] = Math.max(p.ammo[result] ?? 0, def.startAmmo * 2);
+  setNotice(state, `${def.name.toUpperCase()} EVOLVED`);
+}
+
 function boxCost(state: GameState): number {
   return state.fireSaleT > 0 ? COST_MYSTERY_BOX_FIRESALE : COST_MYSTERY_BOX;
 }
@@ -147,12 +176,26 @@ export function interactCost(state: GameState, it: Interactable): number {
 /** True when this buyable is currently usable (power gate + affordability aside). */
 export function interactReady(state: GameState, it: Interactable): boolean {
   if (it.needsPower && !state.powerOn) return false;
-  if (it.kind === 'packapunch' && state.packed[state.players[0]?.weapon ?? 'pistol']) return false;
+  // Pack-a-Punch is "ready" if the held weapon isn't yet upgraded, OR it's already
+  // upgraded but an EVOLUTION is available (a catalyst + a valid recipe on hand).
+  if (it.kind === 'packapunch') {
+    const p = state.players[0];
+    if (p && state.packed[p.weapon]) return !!evolutionReady(state, p);
+  }
   return true;
 }
 
 function useInteractable(state: GameState, p: PlayerState, it: Interactable, rng: Rng): void {
   if (it.needsPower && !state.powerOn && it.kind !== 'power') return;
+  // A6 — evolution takes priority at the Pack-a-Punch machine and is FREE (the
+  // catalyst + the earlier PaP were the cost), so it runs before the cost gate.
+  if (it.kind === 'packapunch') {
+    const evo = evolutionReady(state, p);
+    if (evo) {
+      evolveWeapon(state, p, evo);
+      return;
+    }
+  }
   const cost = interactCost(state, it);
   if (state.cash < cost) return;
 
