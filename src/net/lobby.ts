@@ -1,7 +1,11 @@
+import { dailySeedString } from '../sim/rng';
+import { todayYYYYMMDD } from '../game/scores';
 import { createGuest, createHost, makeRoomCode, type GuestNet, type HostNet } from './net';
 
+// `seed` present ⇒ a deterministic seeded run (daily challenge / shared seed).
+// Absent ⇒ a normal solo run driven by Math.random.
 export type GameConfig =
-  | { role: 'solo' }
+  | { role: 'solo'; seed?: string }
   | { role: 'host'; net: HostNet; players: number }
   | { role: 'guest'; net: GuestNet; you: number };
 
@@ -37,9 +41,14 @@ export function showLobby(): Promise<GameConfig> {
     const menu = () => {
       root.innerHTML = `<div class="box"><h1>DEADLIGHT</h1><div class="sub">CO-OP · UP TO 4</div>
         <button id="solo">▶ SOLO</button>
+        <button id="daily">☠ DAILY CHALLENGE</button>
         <button id="host">⌂ HOST GAME</button>
-        <button id="join">⇲ JOIN GAME</button></div>`;
+        <button id="join">⇲ JOIN GAME</button>
+        <div class="sub" style="margin:14px 0 0">SEED · ${dailySeedString(todayYYYYMMDD())}</div></div>`;
       root.querySelector('#solo')!.addEventListener('click', () => done({ role: 'solo' }));
+      root.querySelector('#daily')!.addEventListener('click', () =>
+        done({ role: 'solo', seed: dailySeedString(todayYYYYMMDD()) }),
+      );
       root.querySelector('#host')!.addEventListener('click', hostFlow);
       root.querySelector('#join')!.addEventListener('click', joinFlow);
     };

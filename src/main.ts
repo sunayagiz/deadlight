@@ -1,7 +1,9 @@
 import Phaser from 'phaser';
 import { GameScene } from './game/GameScene';
+import { todayYYYYMMDD } from './game/scores';
 import { showLobby } from './net/lobby';
 import { setSession } from './net/session';
+import { dailySeedString } from './sim/rng';
 
 function launch(): void {
   new Phaser.Game({
@@ -18,12 +20,17 @@ function launch(): void {
   });
 }
 
-// Debug params (?zoo/?wave/?at/?wpn/?solo) skip the lobby and go straight to solo.
+// Debug params skip the lobby and go straight to solo.
+//   ?daily            → today's seeded daily challenge
+//   ?seed=<str>       → replay a specific seed (e.g. share/verify a run)
+//   ?zoo/?wave/?at/?wpn/?solo → normal (unseeded) solo playtest
 const qs = new URLSearchParams(window.location.search);
-const debug = ['zoo', 'wave', 'at', 'wpn', 'solo'].some((k) => qs.has(k));
+const debug = ['zoo', 'wave', 'at', 'wpn', 'solo', 'daily', 'seed'].some((k) => qs.has(k));
 
 if (debug) {
-  setSession({ role: 'solo' });
+  const seedParam = qs.get('seed');
+  const seed = seedParam ?? (qs.has('daily') ? dailySeedString(todayYYYYMMDD()) : undefined);
+  setSession({ role: 'solo', seed });
   launch();
 } else {
   showLobby().then((cfg) => {

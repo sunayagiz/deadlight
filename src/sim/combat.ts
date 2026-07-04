@@ -156,6 +156,7 @@ export function updateCombat(state: GameState, dt: number, rng: () => number = M
       alive.push(e);
     } else {
       state.wave.killsThisWave += 1;
+      state.totalKills += 1; // run-wide tally for the daily score
       const bounty = ZOMBIES[e.type].boss ? CASH_BOSS : CASH_PER_KILL * ZOMBIES[e.type].cost;
       state.cash += Math.round(bounty * greed * cm); // Double Points doubles kill cash too
       dropLoot(state, e.pos, rng);

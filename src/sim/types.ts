@@ -214,6 +214,7 @@ export interface GameState {
   doors: Door[];
   gameOver: boolean;
   won: boolean; // true = the squad escaped (extraction complete)
+  totalKills: number; // running kill tally across all waves (drives the run score)
   cash: number; // shared squad currency, spent in the between-wave shop
   perks: Record<string, number>; // shared squad perk levels (perk id → stacks)
   perkDraft: string[] | null; // 3 perk ids offered right now, or null when no draft is pending

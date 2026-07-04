@@ -18,8 +18,10 @@ import { ZOMBIES, spawnEnemy } from '../sim/enemies';
 import { buildMap, mapSolids } from '../sim/map';
 import { PERKS, effectiveMaxHp, rerollCost, type PerkId } from '../sim/perks';
 import { SHOP } from '../sim/shop';
+import { hashSeed, mulberry32 } from '../sim/rng';
 import { createGameState } from '../sim/state';
 import { stepSim } from '../sim/step';
+import { recordScore } from './scores';
 import { lerp } from '../sim/vec';
 import { segmentClear } from '../sim/vision';
 import { updateAim } from '../sim/weapons';
@@ -125,6 +127,12 @@ export class GameScene extends Phaser.Scene {
   private inputCollector!: InputCollector;
   private role: 'solo' | 'host' | 'guest' = 'solo';
   private localIndex = 0;
+  // Daily/seeded run: one stateful rng instance per run, threaded to every stepSim
+  // call so the whole run is reproducible from `seed`. Undefined ⇒ normal run
+  // (stepSim falls back to Math.random). Only the solo/host sim consumes it.
+  private seed?: string;
+  private simRng?: () => number;
+  private dailyHud?: Phaser.GameObjects.Text; // seed + live score, daily runs only
   private hostNet?: HostNet;
   private guestNet?: GuestNet;
   private bcastAccum = 0; // host: throttle snapshots to ~30 Hz
@@ -252,6 +260,13 @@ export class GameScene extends Phaser.Scene {
     } else if (session.role === 'guest') {
       this.guestNet = session.net;
       this.localIndex = session.you;
+    }
+    // Seeded (daily) run: build ONE rng from the seed for this whole run. On a
+    // scene.restart() create() runs again → a fresh rng from the same seed → the
+    // run replays identically, which is exactly what a daily challenge wants.
+    if (session.role === 'solo' && session.seed) {
+      this.seed = session.seed;
+      this.simRng = mulberry32(hashSeed(session.seed));
     }
     const numPlayers = session.role === 'host' ? session.players : session.role === 'guest' ? 4 : 1;
     this.state = createGameState(
@@ -395,6 +410,14 @@ export class GameScene extends Phaser.Scene {
       .text(16, 470, '', { fontFamily: 'monospace', fontSize: '15px', color: '#7dffa0', fontStyle: 'bold' })
       .setScrollFactor(0)
       .setDepth(DEPTH_HUD);
+    // Daily "seed of the day" + live score strip (only on a seeded run).
+    if (this.seed) {
+      this.dailyHud = this.add
+        .text(480, 524, '', { fontFamily: 'monospace', fontSize: '12px', color: '#8affbf', fontStyle: 'bold' })
+        .setOrigin(0.5)
+        .setScrollFactor(0)
+        .setDepth(DEPTH_HUD);
+    }
 
     this.bossBarBack = this.add.rectangle(480, 26, 380, 12, COLORS.bossBarBack).setScrollFactor(0).setDepth(DEPTH_HUD).setVisible(false);
     this.bossBarFill = this.add
@@ -699,6 +722,11 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  /** Run score = wave reached ×100 + total kills. (Reaching a new wave is the main driver; kills break ties.) */
+  private runScore(): number {
+    return this.state.wave.index * 100 + this.state.totalKills;
+  }
+
   /** The player this client controls (host/solo = 0, guest = its slot). */
   private local(): PlayerState {
     return this.state.players[this.localIndex] ?? this.state.players[0];
@@ -770,7 +798,9 @@ export class GameScene extends Phaser.Scene {
     } else {
       if (this.role === 'host') this.hostNet!.inputs[0] = input;
       const inputs = this.role === 'host' ? this.hostNet!.inputs : [input];
-      alpha = this.loop.tick(dt, () => stepSim(this.state, inputs, SIM_DT));
+      // Seeded run threads this.simRng; a normal run passes undefined so stepSim's
+      // default (Math.random) kicks in — normal play is unchanged.
+      alpha = this.loop.tick(dt, () => stepSim(this.state, inputs, SIM_DT, this.simRng));
       if (this.role === 'host') {
         this.bcastAccum += dt;
         if (this.bcastAccum >= 1 / 30) {
@@ -1298,6 +1328,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.cashHud.setText(`$ ${this.state.cash}`);
+    if (this.dailyHud) this.dailyHud.setText(`DAILY · ${this.seed}   SCORE ${this.runScore()}`);
     this.updateShopUI();
     this.updateDraftUI();
     this.updateExtractionHud(dt);
@@ -1305,16 +1336,40 @@ export class GameScene extends Phaser.Scene {
 
     if (this.state.gameOver && !this.overlay) {
       const won = this.state.won;
+      const head = won ? 'YOU ESCAPED' : 'YOU DIED';
+      const seeded = !!this.seed;
+      // Seeded run: compute the score, persist the local best for this seed, and
+      // surface both on the end screen (+ a copyable seed for sharing a run).
+      const scoreLines = seeded
+        ? (() => {
+            const score = this.runScore();
+            const best = recordScore(this.seed!, score);
+            return `\n\nSCORE ${score}    BEST ${best}\n${this.seed}`;
+          })()
+        : '';
       this.overlay = this.add
-        .text(480, 270, won ? 'YOU ESCAPED\n\n[R] play again' : 'YOU DIED\n\n[R] restart', {
+        .text(480, seeded ? 250 : 270, `${head}${scoreLines}\n\n[R] ${won ? 'play again' : 'restart'}`, {
           fontFamily: 'monospace',
-          fontSize: '48px',
+          fontSize: seeded ? '34px' : '48px',
           color: won ? '#7dffa0' : '#c23b3b',
           align: 'center',
         })
         .setOrigin(0.5)
         .setScrollFactor(0)
         .setDepth(DEPTH_HUD);
+      if (seeded) {
+        // click-to-copy the seed string so players can share/challenge a run
+        const copy = this.add
+          .text(480, 400, '⧉ click to copy seed', { fontFamily: 'monospace', fontSize: '15px', color: '#8affbf' })
+          .setOrigin(0.5)
+          .setScrollFactor(0)
+          .setDepth(DEPTH_HUD)
+          .setInteractive({ useHandCursor: true });
+        copy.on('pointerdown', () => {
+          void navigator.clipboard?.writeText(this.seed!);
+          copy.setText('✓ seed copied');
+        });
+      }
       if (won) this.banner('EXTRACTION COMPLETE', '#7dffa0');
     }
 

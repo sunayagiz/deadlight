@@ -29,6 +29,7 @@ export interface Snapshot {
   ne: number;
   nl: number;
   won: boolean;
+  tk: number; // totalKills (co-op score display)
   cash: number;
   perks: Record<string, number>;
   draft: string[] | null; // perkDraft
@@ -62,6 +63,7 @@ export function snapshot(s: GameState): Snapshot {
     ne: s.nextEnemyId,
     nl: s.nextLootId,
     won: s.won,
+    tk: s.totalKills,
     cash: s.cash,
     perks: s.perks,
     draft: s.perkDraft,
@@ -99,6 +101,7 @@ export function applySnapshot(s: GameState, snap: Snapshot): void {
   s.nextEnemyId = snap.ne;
   s.nextLootId = snap.nl;
   s.won = snap.won;
+  s.totalKills = snap.tk;
   s.cash = snap.cash;
   s.perks = snap.perks;
   s.perkDraft = snap.draft;

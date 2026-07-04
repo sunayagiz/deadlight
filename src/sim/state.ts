@@ -62,6 +62,7 @@ export function createGameState(
     doors: doors.map((d) => ({ ...d })),
     gameOver: false,
     won: false,
+    totalKills: 0,
     cash: 0,
     perks: {},
     perkDraft: null,
