@@ -22,6 +22,8 @@ import { hashSeed, mulberry32 } from '../sim/rng';
 import { createGameState } from '../sim/state';
 import { stepSim } from '../sim/step';
 import { recordScore } from './scores';
+import { applyLoadout } from './loadouts';
+import { addCurrency, runReward } from './profile';
 import { lerp } from '../sim/vec';
 import { segmentClear } from '../sim/vision';
 import { updateAim } from '../sim/weapons';
@@ -295,6 +297,14 @@ export class GameScene extends Phaser.Scene {
       map.interactables,
     );
     if (session.role === 'guest') this.state.players.forEach((p, i) => (p.alive = i === this.localIndex));
+
+    // Meta-progression: the host/solo player applies its unlocked starting loadout to
+    // its OWN player before any snapshot exists. Guests keep the default start (the
+    // host's loadout is not synced — this is a render/session-layer choice, never
+    // part of the netcoded Snapshot). See src/game/loadouts.ts.
+    if (session.role !== 'guest' && session.loadout) {
+      applyLoadout(this.state, this.state.players[this.localIndex], session.loadout);
+    }
 
     // Debug/playtest: ?wave=N jumps straight to wave N with a short countdown;
     // ?zoo=1 lines up one of every enemy type; ?at=x,y teleports the start.
@@ -1522,6 +1532,11 @@ export class GameScene extends Phaser.Scene {
     this.updateThreatArrows(); // screen-edge arrows toward off-screen bosses/hounds
 
     if (this.state.gameOver && !this.overlay) {
+      // Meta-progression: award run currency exactly once (the !this.overlay guard —
+      // the overlay is created just below and gates this whole block per run). Stored
+      // in the localStorage profile, OUTSIDE GameState / the netcoded snapshot.
+      const reward = runReward(this.state.wave.index, this.state.totalKills);
+      addCurrency(reward);
       const won = this.state.won;
       const head = won ? 'YOU ESCAPED' : 'YOU DIED';
       const seeded = !!this.seed;
