@@ -1,4 +1,4 @@
-import { ARMOR_MELEE_BONUS, PAP_DMG_MULT } from '../config';
+import { ARMOR_MELEE_BONUS, PAP_TIER_DMG } from '../config';
 import { ZOMBIES } from './enemies';
 import { applyLifesteal, damageMult } from './perks';
 import { WEAPONS, type WeaponDef } from './weapons';
@@ -45,7 +45,7 @@ export function updateMelee(state: GameState, p: PlayerState, input: PlayerInput
   const limited = def.startAmmo !== undefined;
   if (limited && (p.ammo[def.id] ?? 0) <= 0) return;
 
-  const dmgMult = damageMult(state) * (state.packed[p.weapon] ? PAP_DMG_MULT : 1);
+  const dmgMult = damageMult(state) * (PAP_TIER_DMG[state.papTier[p.weapon] ?? 0] ?? 1);
   if (def.hold) {
     hitArc(state, p, def, def.damage * dmgMult * dt); // dps
     p.meleeSwing = 0.05;

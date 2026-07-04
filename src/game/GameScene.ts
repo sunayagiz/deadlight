@@ -13,6 +13,8 @@ import {
   FLASHLIGHT_RANGE,
   INTERACT_RADIUS,
   LEVELS_FOR,
+  PAP_MAX_TIER,
+  PAP_ROMAN,
   PLAYER_MAX_HP,
   PLAYER_RADIUS,
   SIM_DT,
@@ -86,6 +88,27 @@ function weaponSkin(id: WeaponId): { key: string; tint: number | null } {
   const s = WEAPON_SKIN[id];
   return { key: `wpn_${s ? s.base : id}`, tint: s ? s.tint : null };
 }
+
+/**
+ * B7 — Mystery Box rarity flavour (render-only; no gameplay change). The box-reveal
+ * glow + a short label riff on the rolled weapon's rarity: the Ray Gun and its
+ * evolutions are LEGENDARY gold, the heavy hardware is RARE blue, the basics COMMON.
+ */
+const WEAPON_RARITY: Record<WeaponId, { label: string; color: number }> = {
+  pistol: { label: 'COMMON', color: 0xbfc4cc },
+  katana: { label: 'COMMON', color: 0xbfc4cc },
+  bat: { label: 'COMMON', color: 0xbfc4cc },
+  smg: { label: 'COMMON', color: 0xbfc4cc },
+  shotgun: { label: 'COMMON', color: 0xbfc4cc },
+  machinegun: { label: 'RARE', color: 0x4ec6ff },
+  minigun: { label: 'RARE', color: 0x4ec6ff },
+  rpg: { label: 'RARE', color: 0x4ec6ff },
+  chainsaw: { label: 'RARE', color: 0x4ec6ff },
+  raygun: { label: 'LEGENDARY', color: 0xffd24a },
+  wunderwaffe: { label: 'LEGENDARY', color: 0xffd24a },
+  dragonsbreath: { label: 'LEGENDARY', color: 0xffd24a },
+  deathmachine: { label: 'LEGENDARY', color: 0xffd24a },
+};
 
 /** COD interactable marker colours + floating power-up icon styles. */
 const KIND_COLOR: Record<string, number> = { mysterybox: 0xffcf4e, packapunch: 0xb060ff, wallbuy: 0x4ec6ff, power: 0xff5a5a };
@@ -299,6 +322,8 @@ export class GameScene extends Phaser.Scene {
   private codStatus!: Phaser.GameObjects.Text; // active power-up timers
   private powerupNodes = new Map<number, { g: Phaser.GameObjects.Star; t: Phaser.GameObjects.Text }>();
   private boxRevealIcon!: Phaser.GameObjects.Image;
+  private boxRevealLabel!: Phaser.GameObjects.Text; // B7: rarity flavour under the box reveal
+  private boxPrevXY: { x: number; y: number } | null = null; // B7: last box spot, to telegraph the teddy relocate
   // co-op ping markers (world-space, pooled by ping id) + teammate status + off-screen threat arrows
   private pingNodes = new Map<number, { chevron: Phaser.GameObjects.Triangle; dot: Phaser.GameObjects.Arc; label: Phaser.GameObjects.Text }>();
   private teammateHud = new Map<number, { back: Phaser.GameObjects.Rectangle; fill: Phaser.GameObjects.Rectangle; name: Phaser.GameObjects.Text }>();
@@ -850,6 +875,11 @@ export class GameScene extends Phaser.Scene {
       this.codMarkers.push({ icon, label });
     }
     this.boxRevealIcon = this.add.image(0, 0, 'wpn_pistol').setDepth(DEPTH_HUD - 1).setVisible(false);
+    this.boxRevealLabel = this.add
+      .text(0, 0, '', { fontFamily: 'monospace', fontSize: '11px', color: '#ffffff', fontStyle: 'bold' })
+      .setOrigin(0.5)
+      .setDepth(DEPTH_HUD - 1)
+      .setVisible(false);
     this.codPrompt = this.add
       .text(480, 424, '', { fontFamily: 'monospace', fontSize: '16px', color: '#ffe08a', fontStyle: 'bold', backgroundColor: '#000a' })
       .setOrigin(0.5).setScrollFactor(0).setDepth(DEPTH_HUD + 1).setPadding(7, 4, 7, 4).setVisible(false);
@@ -994,26 +1024,46 @@ export class GameScene extends Phaser.Scene {
       m.icon.setPosition(it.x, it.y).setRotation(s.time * 1.5).setScale(1 + 0.12 * Math.sin(s.time * 4)).setAlpha(gated ? 0.3 : 0.9);
       m.label.setPosition(it.x, it.y - 28).setAlpha(gated ? 0.4 : 0.95);
     });
-    // Mystery Box reveal: pop the rolled weapon above the box
+    // Mystery Box reveal: pop the rolled weapon above the box, tagged with its rarity (B7)
     const box = s.interactables.find((it) => it.kind === 'mysterybox');
     if (s.boxReveal && box) {
       const skin = weaponSkin(s.boxReveal.weapon);
-      this.boxRevealIcon.setVisible(true).setTexture(skin.key).setPosition(box.x, box.y - 44);
-      if (skin.tint !== null) this.boxRevealIcon.setTint(skin.tint);
-      else this.boxRevealIcon.clearTint();
-      this.setSpriteHeight(this.boxRevealIcon, 30);
+      const rar = WEAPON_RARITY[s.boxReveal.weapon] ?? { label: 'COMMON', color: 0xbfc4cc };
+      this.boxRevealIcon.setVisible(true).setTexture(skin.key).setPosition(box.x, box.y - 48);
+      // rarity glow: legendary/rare tint the icon; commons keep their own skin colour
+      if (rar.label === 'COMMON') skin.tint !== null ? this.boxRevealIcon.setTint(skin.tint) : this.boxRevealIcon.clearTint();
+      else this.boxRevealIcon.setTint(rar.color);
+      const pop = 1 + 0.1 * Math.sin(s.time * 10);
+      this.setSpriteHeight(this.boxRevealIcon, 30 * pop);
+      this.boxRevealLabel
+        .setVisible(true)
+        .setText(rar.label)
+        .setColor('#' + rar.color.toString(16).padStart(6, '0'))
+        .setPosition(box.x, box.y - 28);
     } else {
       this.boxRevealIcon.setVisible(false);
+      this.boxRevealLabel.setVisible(false);
+    }
+    // B7 — teddy-bear relocate TELL: when the box teleports, leave a fading ghost
+    // marker at the OLD spot so players learn the box left (the move itself is
+    // host-authoritative in the sim; this is a pure render reaction).
+    if (box) {
+      if (this.boxPrevXY && (this.boxPrevXY.x !== box.x || this.boxPrevXY.y !== box.y)) {
+        this.spawnBoxMovedTell(this.boxPrevXY.x, this.boxPrevXY.y);
+      }
+      this.boxPrevXY = { x: box.x, y: box.y };
     }
     // proximity buy prompt (nearest buyable, else a nearby pay-door)
     const near = nearestBuyable(s, lp);
     let prompt = '';
     if (near) {
       const evo = near.kind === 'packapunch' ? evolutionReady(s, lp) : undefined;
+      const papTier = near.kind === 'packapunch' ? (s.papTier[lp.weapon] ?? 0) : 0;
       if (near.needsPower && !s.powerOn) prompt = `${near.label.toUpperCase()} — NEEDS POWER`;
       else if (near.kind === 'power') prompt = s.powerOn ? '' : '[F] Turn on POWER';
       else if (evo) prompt = `[F] EVOLVE — ${evo.name}`;
-      else if (near.kind === 'packapunch' && s.packed[lp.weapon]) prompt = `${WEAPONS[lp.weapon].name} already upgraded`;
+      else if (near.kind === 'packapunch' && papTier >= PAP_MAX_TIER) prompt = `${WEAPONS[lp.weapon].name} ✦${PAP_ROMAN[PAP_MAX_TIER]} — MAX`;
+      else if (near.kind === 'packapunch') prompt = `[F] PACK-A-PUNCH ${PAP_ROMAN[papTier + 1]} — $${interactCost(s, near)}`;
       else if (interactReady(s, near) || near.kind === 'wallbuy' || near.kind === 'mysterybox')
         prompt = `[F] ${near.label} — $${interactCost(s, near)}`;
     } else {
@@ -1036,6 +1086,29 @@ export class GameScene extends Phaser.Scene {
     this.codStatus.setText(chips.join('   '));
     // floating power-up pickups
     this.syncPowerups();
+  }
+
+  /**
+   * B7 — teddy-bear relocate telegraph. Fires when the Mystery Box teleports:
+   * a distinct whoosh + a fading "☒ BOX LEFT" ghost that lifts and dissolves at
+   * the OLD spot, so the disappearance reads as an event, not a silent surprise.
+   */
+  private spawnBoxMovedTell(x: number, y: number): void {
+    this.sfx('whoosh', 0.6, 0.7); // low, packing-up whoosh — distinct from a spin
+    const ghost = this.add.star(x, y, 4, 6, 15, 0xffcf4e, 0.9).setDepth(DEPTH_HUD - 2);
+    const tag = this.add
+      .text(x, y - 30, '☒ BOX LEFT', { fontFamily: 'monospace', fontSize: '13px', color: '#ffcf4e', fontStyle: 'bold' })
+      .setOrigin(0.5)
+      .setDepth(DEPTH_HUD - 2);
+    this.tweens.add({
+      targets: [ghost, tag],
+      alpha: 0,
+      y: '-=26',
+      duration: 1400,
+      ease: 'Cubic.easeOut',
+      onComplete: () => { ghost.destroy(); tag.destroy(); },
+    });
+    this.tweens.add({ targets: ghost, scale: 1.6, duration: 1400, ease: 'Cubic.easeOut' });
   }
 
   private syncPowerups(): void {
@@ -1900,9 +1973,12 @@ export class GameScene extends Phaser.Scene {
     if (hudSkin.tint !== null) this.weaponIcon.setTint(hudSkin.tint);
     else this.weaponIcon.clearTint();
     this.setSpriteHeight(this.weaponIcon, 34);
+    // B7 — show the held weapon's Pack-a-Punch tier ("SMG ✦II") so the chase is legible.
+    const tier = this.state.papTier[lp.weapon] ?? 0;
+    const papTag = tier > 0 ? ` ✦${PAP_ROMAN[tier]}` : '';
     // A6 — show unspent catalysts so the player knows an evolution is fuelled.
     const cat = lp.catalysts > 0 ? `   ◈x${lp.catalysts}` : '';
-    this.weaponHud.setText(`${def.name}  [${ammo}]${cat}     ${slots}`);
+    this.weaponHud.setText(`${def.name}${papTag}  [${ammo}]${cat}     ${slots}`);
 
     const boss = this.state.enemies.find((e) => e.boss);
     if (boss) {

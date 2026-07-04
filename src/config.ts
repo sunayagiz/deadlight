@@ -146,8 +146,18 @@ export const COST_PACK_A_PUNCH = 5000; // COD Pack-a-Punch
 export const COST_POWER = 0; // power switch is free to flip (a lever, not a purchase)
 export const BOX_TEDDY_MIN_USES = 3; // earliest spin the teddy can relocate the box
 export const BOX_TEDDY_CHANCE = 0.28; // per-spin chance (after the minimum) the box moves
-export const PAP_DMG_MULT = 2.0; // Pack-a-Punch damage multiplier
-export const PAP_AMMO_MULT = 2.0; // Pack-a-Punch reserve-ammo multiplier
+export const PAP_DMG_MULT = 2.0; // Pack-a-Punch damage multiplier (tier I — kept for A6 comparisons)
+export const PAP_AMMO_MULT = 2.0; // Pack-a-Punch reserve-ammo multiplier (tier I)
+// B7 — Pack-a-Punch TIERS. Index by tier (0 = un-packed, 1..3 = I/II/III). The
+// upgrade is a chase: each tier hits harder and carries a fatter reserve, at a
+// rising cost. Damage/ammo arrays are 0-indexed (tier 0 = the ×1 baseline); the
+// cost array is indexed by the CURRENT tier (cost to buy the NEXT one), so
+// PAP_TIER_COST[0] buys I, [1] buys II, [2] buys III.
+export const PAP_MAX_TIER = 3; // highest Pack-a-Punch tier
+export const PAP_TIER_DMG = [1, 2, 3, 4]; // damage multiplier by tier (0..3)
+export const PAP_TIER_AMMO = [1, 2, 3, 4]; // reserve-ammo multiplier by tier (0..3)
+export const PAP_TIER_COST = [5000, 7500, 10000]; // cost to upgrade FROM tier i to i+1
+export const PAP_ROMAN = ['', 'I', 'II', 'III']; // tier → display numeral (tier 0 shows nothing)
 // A6 — Weapon Evolutions. A catalyst is the gate for turning a Pack-a-Punched
 // weapon into its evolved super-form. Pricey on purpose: the catalyst + a prior
 // PaP (5000) are the whole cost, so the evolve at the machine itself is free.

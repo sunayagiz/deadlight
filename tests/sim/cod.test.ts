@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CASH_PER_HIT, COST_MYSTERY_BOX, COST_MYSTERY_BOX_FIRESALE, PAP_DMG_MULT } from '../../src/config';
+import { CASH_PER_HIT, COST_MYSTERY_BOX, COST_MYSTERY_BOX_FIRESALE, PAP_TIER_COST, PAP_TIER_DMG } from '../../src/config';
 import { applyPowerUp, updateInteractions } from '../../src/sim/cod';
 import { updateCombat } from '../../src/sim/combat';
 import { spawnEnemy } from '../../src/sim/enemies';
@@ -90,15 +90,15 @@ describe('COD interactables', () => {
     expect(s2.cash).toBe(1000 - COST_MYSTERY_BOX_FIRESALE);
   });
 
-  it('Pack-a-Punch needs power, then upgrades the held weapon damage', () => {
+  it('Pack-a-Punch needs power, then upgrades the held weapon to tier I', () => {
     const s = withInteractable({ kind: 'packapunch', x: 100, y: 100, cost: 5000, label: 'pap', needsPower: true }, 6000);
     updateInteractions(s, use(), () => 0.5);
-    expect(s.packed[s.players[0].weapon]).toBeFalsy(); // gated: power off
+    expect(s.papTier[s.players[0].weapon] ?? 0).toBe(0); // gated: power off
     expect(s.cash).toBe(6000); // not charged
     s.powerOn = true;
     updateInteractions(s, use(), () => 0.5);
-    expect(s.packed[s.players[0].weapon]).toBe(true);
-    expect(s.cash).toBe(1000);
+    expect(s.papTier[s.players[0].weapon]).toBe(1);
+    expect(s.cash).toBe(6000 - PAP_TIER_COST[0]); // tier-I cost
   });
 
   it('wall-buy grants the wall gun; power switch flips power', () => {
@@ -113,9 +113,12 @@ describe('COD interactables', () => {
     expect(power.powerOn).toBe(true);
   });
 
-  it('applies the Pack-a-Punch multiplier to damage output', () => {
-    // sanity: PAP constant is a real buff
-    expect(PAP_DMG_MULT).toBeGreaterThan(1);
+  it('applies a rising Pack-a-Punch multiplier per tier', () => {
+    // sanity: each tier is a strictly bigger buff than the last
+    expect(PAP_TIER_DMG[0]).toBe(1);
+    expect(PAP_TIER_DMG[1]).toBeGreaterThan(PAP_TIER_DMG[0]);
+    expect(PAP_TIER_DMG[2]).toBeGreaterThan(PAP_TIER_DMG[1]);
+    expect(PAP_TIER_DMG[3]).toBeGreaterThan(PAP_TIER_DMG[2]);
   });
 });
 

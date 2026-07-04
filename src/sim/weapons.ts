@@ -1,4 +1,4 @@
-import { PAP_DMG_MULT } from '../config';
+import { PAP_TIER_DMG } from '../config';
 import { damageMult, fireRateMult } from './perks';
 import type { GameState, PlayerInput, PlayerState, WeaponId, WeaponKind } from './types';
 
@@ -122,7 +122,7 @@ export function updateFiring(
   if (!input.fire || p.fireCooldown > 0 || !hasAmmo(p, def)) return;
 
   const rateScale = def.id === 'minigun' ? 0.2 + 0.8 * p.spin : 1;
-  const pap = state.packed[p.weapon] ? PAP_DMG_MULT : 1; // Pack-a-Punch
+  const pap = PAP_TIER_DMG[state.papTier[p.weapon] ?? 0] ?? 1; // Pack-a-Punch tier multiplier
   const dmg = def.damage * damageMult(state) * pap; // perk- + PaP-scaled
   const owner = state.players.indexOf(p); // life-steal credit / friendly-fire attribution
   const pellets = def.pellets ?? 1;

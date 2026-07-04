@@ -304,7 +304,7 @@ export interface GameState {
   instaKillT: number; // seconds of Insta-Kill left (every hit one-shots)
   doublePtsT: number; // seconds of Double Points left (all cash ×2)
   fireSaleT: number; // seconds of Fire Sale left (Mystery Box costs 10)
-  packed: Record<string, boolean>; // weapon id → Pack-a-Punched?
+  papTier: Record<string, number>; // B7: weapon id → Pack-a-Punch tier (0 = un-packed, 1..3 = I/II/III)
   dogRound: boolean; // is the current wave a hellhound special round?
   notice: string; // transient announcer line ("MAX AMMO", "POWER ON", …)
   noticeT: number; // seconds the notice stays up

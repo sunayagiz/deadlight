@@ -47,7 +47,7 @@ export interface Snapshot {
   ik: number; // instaKillT
   dp: number; // doublePtsT
   fs: number; // fireSaleT
-  packed: Record<string, boolean>;
+  papTier: Record<string, number>; // B7: weapon id → Pack-a-Punch tier (0..3)
   dog: boolean;
   notice: string;
   noticeT: number;
@@ -88,7 +88,7 @@ export function snapshot(s: GameState): Snapshot {
     ik: s.instaKillT,
     dp: s.doublePtsT,
     fs: s.fireSaleT,
-    packed: s.packed,
+    papTier: s.papTier,
     dog: s.dogRound,
     notice: s.notice,
     noticeT: s.noticeT,
@@ -133,7 +133,7 @@ export function applySnapshot(s: GameState, snap: Snapshot): void {
   s.instaKillT = snap.ik;
   s.doublePtsT = snap.dp;
   s.fireSaleT = snap.fs;
-  s.packed = snap.packed;
+  s.papTier = snap.papTier;
   s.dogRound = snap.dog;
   s.notice = snap.notice;
   s.noticeT = snap.noticeT;

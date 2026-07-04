@@ -4,11 +4,14 @@ import {
   CASH_PER_HIT,
   COST_MYSTERY_BOX,
   COST_MYSTERY_BOX_FIRESALE,
-  COST_PACK_A_PUNCH,
   INTERACT_RADIUS,
   NOTICE_TIME,
   NUKE_CASH,
-  PAP_DMG_MULT,
+  PAP_MAX_TIER,
+  PAP_ROMAN,
+  PAP_TIER_AMMO,
+  PAP_TIER_COST,
+  PAP_TIER_DMG,
   POWERUP_EFFECT_TIME,
   POWERUP_MAX_ALIVE,
   POWERUP_TTL,
@@ -21,6 +24,16 @@ import type { Rng } from './waves';
 export function setNotice(state: GameState, text: string): void {
   state.notice = text;
   state.noticeT = NOTICE_TIME;
+}
+
+/** B7: current Pack-a-Punch tier of a weapon (0 = un-packed, 1..3 = I/II/III). */
+export function papTierOf(state: GameState, weapon: WeaponId): number {
+  return state.papTier[weapon] ?? 0;
+}
+
+/** B7: reserve-ammo multiplier a weapon's current Pack-a-Punch tier grants. */
+function papAmmoMult(state: GameState, weapon: WeaponId): number {
+  return PAP_TIER_AMMO[papTierOf(state, weapon)] ?? 1;
 }
 
 /** Double Points doubles every cash gain while active. */
@@ -58,7 +71,7 @@ function refillAllAmmo(state: GameState): void {
   for (const p of state.players) {
     for (const id of p.owned) {
       const def = WEAPONS[id];
-      if (def.startAmmo !== undefined) p.ammo[id] = def.startAmmo * (state.packed[id] ? 2 : 1);
+      if (def.startAmmo !== undefined) p.ammo[id] = def.startAmmo * papAmmoMult(state, id);
     }
   }
 }
@@ -130,7 +143,7 @@ function rollBoxWeapon(rng: Rng): WeaponId {
 function grantWeapon(state: GameState, p: PlayerState, id: WeaponId): void {
   const def = WEAPONS[id];
   if (!p.owned.includes(id)) p.owned.push(id);
-  if (def.startAmmo !== undefined) p.ammo[id] = Math.max(p.ammo[id] ?? 0, def.startAmmo * (state.packed[id] ? 2 : 1));
+  if (def.startAmmo !== undefined) p.ammo[id] = Math.max(p.ammo[id] ?? 0, def.startAmmo * papAmmoMult(state, id));
   p.weapon = id;
 }
 
@@ -140,7 +153,7 @@ function grantWeapon(state: GameState, p: PlayerState, id: WeaponId): void {
  * evolution recipe, and the player to hold at least one catalyst.
  */
 export function evolutionReady(state: GameState, p: PlayerState): Evolution | undefined {
-  if (!state.packed[p.weapon] || p.catalysts < 1) return undefined;
+  if (papTierOf(state, p.weapon) < 1 || p.catalysts < 1) return undefined;
   return evolutionFor(p.weapon);
 }
 
@@ -158,8 +171,10 @@ function evolveWeapon(state: GameState, p: PlayerState, evo: Evolution): void {
   else if (!p.owned.includes(result)) p.owned.push(result);
   p.weapon = result;
   p.catalysts -= 1;
-  state.packed[result] = true; // the super-form is Pack-a-Punched from birth
-  if (def.startAmmo !== undefined) p.ammo[result] = Math.max(p.ammo[result] ?? 0, def.startAmmo * 2);
+  // The super-form is born Pack-a-Punched: it inherits the base's tier (min I).
+  const tier = Math.max(1, papTierOf(state, evo.base));
+  state.papTier[result] = tier;
+  if (def.startAmmo !== undefined) p.ammo[result] = Math.max(p.ammo[result] ?? 0, def.startAmmo * (PAP_TIER_AMMO[tier] ?? 1));
   setNotice(state, `${def.name.toUpperCase()} EVOLVED`);
 }
 
@@ -167,20 +182,27 @@ function boxCost(state: GameState): number {
   return state.fireSaleT > 0 ? COST_MYSTERY_BOX_FIRESALE : COST_MYSTERY_BOX;
 }
 
-/** Cost shown for an interactable right now (box respects Fire Sale). */
+/** Cost shown for an interactable right now (box respects Fire Sale; PaP rises per tier). */
 export function interactCost(state: GameState, it: Interactable): number {
   if (it.kind === 'mysterybox') return boxCost(state);
+  // B7 — Pack-a-Punch cost climbs with the held weapon's next tier (players[0]
+  // is the reference, matching interactReady's solo/host assumption).
+  if (it.kind === 'packapunch') {
+    const p = state.players[0];
+    const tier = p ? papTierOf(state, p.weapon) : 0;
+    return tier < PAP_MAX_TIER ? PAP_TIER_COST[tier] : it.cost;
+  }
   return it.cost;
 }
 
 /** True when this buyable is currently usable (power gate + affordability aside). */
 export function interactReady(state: GameState, it: Interactable): boolean {
   if (it.needsPower && !state.powerOn) return false;
-  // Pack-a-Punch is "ready" if the held weapon isn't yet upgraded, OR it's already
-  // upgraded but an EVOLUTION is available (a catalyst + a valid recipe on hand).
+  // Pack-a-Punch is "ready" while the held weapon can still climb a tier, OR it's
+  // already maxed but an EVOLUTION is available (a catalyst + a valid recipe on hand).
   if (it.kind === 'packapunch') {
     const p = state.players[0];
-    if (p && state.packed[p.weapon]) return !!evolutionReady(state, p);
+    if (p && papTierOf(state, p.weapon) >= PAP_MAX_TIER) return !!evolutionReady(state, p);
   }
   return true;
 }
@@ -230,11 +252,19 @@ function useInteractable(state: GameState, p: PlayerState, it: Interactable, rng
       break;
     }
     case 'packapunch': {
+      // B7 — upgrade the held weapon to the next Pack-a-Punch tier (evolve, if
+      // available, was already handled above). No-op once maxed.
       const w = p.weapon;
-      if (state.packed[w]) return;
-      state.packed[w] = true;
-      if (WEAPONS[w].startAmmo !== undefined) p.ammo[w] = (p.ammo[w] ?? 0) * 2; // topped-up reserve
-      setNotice(state, `${WEAPONS[w].name.toUpperCase()} UPGRADED`);
+      const tier = papTierOf(state, w);
+      if (tier >= PAP_MAX_TIER) return;
+      const next = tier + 1;
+      state.papTier[w] = next;
+      // grow the reserve to the new tier's multiple of the base reserve
+      if (WEAPONS[w].startAmmo !== undefined) {
+        const base = WEAPONS[w].startAmmo!;
+        p.ammo[w] = Math.max(p.ammo[w] ?? 0, base) + base * ((PAP_TIER_AMMO[next] ?? 1) - (PAP_TIER_AMMO[tier] ?? 1));
+      }
+      setNotice(state, `${WEAPONS[w].name.toUpperCase()} — PACK-A-PUNCH ${PAP_ROMAN[next]}`);
       break;
     }
   }
@@ -281,9 +311,9 @@ function buyNearestDoor(state: GameState, p: PlayerState): void {
   }
 }
 
-/** Damage bonus from Pack-a-Punch for a given weapon. */
+/** Damage bonus from the weapon's current Pack-a-Punch tier. */
 export function papDamageMult(state: GameState, weapon: WeaponId): number {
-  return state.packed[weapon] ? PAP_DMG_MULT : 1;
+  return PAP_TIER_DMG[papTierOf(state, weapon)] ?? 1;
 }
 
 export { CASH_PER_HIT };

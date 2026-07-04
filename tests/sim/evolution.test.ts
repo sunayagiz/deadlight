@@ -55,7 +55,7 @@ describe('A6 weapon evolutions', () => {
     const p = s.players[0];
     p.owned = ['raygun'];
     p.weapon = 'raygun';
-    s.packed['raygun'] = true;
+    s.papTier['raygun'] = 1;
     p.catalysts = 1;
     p.ammo['raygun'] = 40;
 
@@ -66,7 +66,7 @@ describe('A6 weapon evolutions', () => {
     expect(p.owned).toContain('wunderwaffe');
     expect(p.owned).not.toContain('raygun'); // the base slot is replaced, not duplicated
     expect(p.catalysts).toBe(0); // token spent
-    expect(s.packed['wunderwaffe']).toBe(true); // evolved form is Pack-a-Punched from birth
+    expect(s.papTier['wunderwaffe']).toBe(1); // evolved form is Pack-a-Punched from birth
     expect(p.ammo['wunderwaffe']).toBe(WEAPONS.wunderwaffe.startAmmo! * 2); // packed reserve
     expect(s.cash).toBe(0); // free
   });
@@ -76,7 +76,7 @@ describe('A6 weapon evolutions', () => {
     const p = s.players[0];
     p.owned = ['shotgun'];
     p.weapon = 'shotgun';
-    s.packed['shotgun'] = true;
+    s.papTier['shotgun'] = 1;
     p.catalysts = 1;
     updateInteractions(s, use(), () => 0.5);
     expect(p.weapon).toBe('dragonsbreath');
@@ -92,7 +92,7 @@ describe('A6 weapon evolutions', () => {
     // first use packs the base (normal PaP), never touching the evolution path
     updateInteractions(s, use(), () => 0.5);
     expect(p.weapon).toBe('raygun');
-    expect(s.packed['raygun']).toBe(true);
+    expect(s.papTier['raygun']).toBe(1);
     expect(p.owned).not.toContain('wunderwaffe');
     expect(s.cash).toBe(1000); // charged the normal 5000
   });
@@ -106,7 +106,7 @@ describe('A6 weapon evolutions', () => {
     expect(evolutionReady(s, p)).toBeUndefined(); // base isn't packed yet
     updateInteractions(s, use(), () => 0.5);
     expect(p.weapon).toBe('raygun'); // just got packed, not evolved
-    expect(s.packed['raygun']).toBe(true);
+    expect(s.papTier['raygun']).toBe(1);
     expect(p.catalysts).toBe(1); // catalyst untouched
     expect(s.cash).toBe(1000);
   });
@@ -115,7 +115,7 @@ describe('A6 weapon evolutions', () => {
     const s = papState(6000);
     const p = s.players[0];
     p.weapon = 'pistol';
-    s.packed['pistol'] = true;
+    s.papTier['pistol'] = 1;
     p.catalysts = 1;
     expect(evolutionReady(s, p)).toBeUndefined();
     updateInteractions(s, use(), () => 0.5);

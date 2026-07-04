@@ -85,7 +85,7 @@ export function createGameState(
     instaKillT: 0,
     doublePtsT: 0,
     fireSaleT: 0,
-    packed: {},
+    papTier: {},
     dogRound: false,
     notice: '',
     noticeT: 0,
