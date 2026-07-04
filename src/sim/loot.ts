@@ -33,12 +33,13 @@ export function dropLoot(state: GameState, pos: Vec2, rng: () => number): void {
   });
 }
 
-/** An ammo box tops up every limited weapon the picker owns (never wasted). */
+/** An ammo box tops up every limited weapon the picker owns (never wasted, never reduced). */
 function resupply(p: PlayerState): void {
   for (const id of p.owned) {
     const def = WEAPONS[id];
     if (def.startAmmo === undefined) continue;
-    p.ammo[id] = Math.min(def.startAmmo * 2, (p.ammo[id] ?? 0) + Math.round(def.startAmmo * 0.5));
+    const current = p.ammo[id] ?? 0;
+    p.ammo[id] = Math.max(current, Math.min(def.startAmmo * 2, current + Math.round(def.startAmmo * 0.5)));
   }
 }
 
