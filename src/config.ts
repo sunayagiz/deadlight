@@ -61,6 +61,12 @@ export const AFFIX_CHANCE_BASE = 0.08; // affix chance at AFFIX_MIN_WAVE
 export const AFFIX_CHANCE_PER_WAVE = 0.012; // added per wave past AFFIX_MIN_WAVE
 export const AFFIX_CHANCE_MAX = 0.35; // cap so most of the horde is still "normal"
 
+// --- Co-op pings (Apex-style coordination) ---
+export const PING_TTL = 5; // s a ping marker stays before it fades
+export const PING_MAX_PER_PLAYER = 3; // cap concurrent pings per player (spam can't flood)
+export const PING_ENEMY_RADIUS = 120; // px: enemy within this of the ping point → 'enemy' ping
+export const PING_LOOT_RADIUS = 120; // px: loot within this (and no enemy) → 'loot' ping
+
 // --- Loot ---
 export const LOOT_DROP_CHANCE = 0.22; // chance a killed enemy drops something
 export const LOOT_TTL = 15; // s before a dropped item despawns

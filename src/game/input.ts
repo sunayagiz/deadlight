@@ -20,6 +20,7 @@ export class InputCollector {
   private pendingPerk = -1; // perk-draft pick requested by the HUD since the last sample
   private pendingReroll = false; // draft reroll requested by the HUD since the last sample
   private pendingBanish = -1; // draft option to banish requested by the HUD since the last sample
+  private pendingPing = false; // co-op ping requested (Z / middle-mouse) since the last sample
 
   constructor(private scene: Phaser.Scene) {
     this.keys = scene.input.keyboard!.addKeys('W,A,S,D,SPACE,SHIFT,F') as Keys;
@@ -29,9 +30,14 @@ export class InputCollector {
       if (ev.key >= '1' && ev.key <= '9') this.pendingSlot = Number(ev.key) - 1;
       else if (ev.key === 'q' || ev.key === 'Q') this.pendingCycle = -1;
       else if (ev.key === 'e' || ev.key === 'E') this.pendingCycle = 1;
+      else if (ev.key === 'z' || ev.key === 'Z') this.pendingPing = true; // ping at the cursor
     });
     scene.input.on('wheel', (_p: unknown, _o: unknown, _dx: number, dy: number) => {
       this.pendingCycle = dy > 0 ? 1 : -1;
+    });
+    // Middle-mouse also pings (Apex muscle memory). button 1 = middle.
+    scene.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
+      if (p.button === 1) this.pendingPing = true;
     });
   }
 
@@ -58,12 +64,14 @@ export class InputCollector {
     const perk = this.pendingPerk;
     const reroll = this.pendingReroll;
     const banish = this.pendingBanish;
+    const ping = this.pendingPing ? { x: world.x, y: world.y } : null; // ping the current aim point
     this.pendingSlot = -1;
     this.pendingCycle = 0;
     this.pendingBuy = -1;
     this.pendingPerk = -1;
     this.pendingReroll = false;
     this.pendingBanish = -1;
+    this.pendingPing = false;
     return {
       moveX: (this.keys.D.isDown ? 1 : 0) - (this.keys.A.isDown ? 1 : 0),
       moveY: (this.keys.S.isDown ? 1 : 0) - (this.keys.W.isDown ? 1 : 0),
@@ -79,6 +87,7 @@ export class InputCollector {
       reroll,
       banish,
       use: Phaser.Input.Keyboard.JustDown(this.keys.F),
+      ping,
     };
   }
 }

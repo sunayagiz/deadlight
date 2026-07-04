@@ -65,6 +65,10 @@ const PU_STYLE: Record<string, { c: number; s: string }> = {
   firesale: { c: 0x8affa0, s: 'SALE' },
 };
 
+/** Co-op ping styling: kind → marker colour + short emoji-free label. */
+const PING_KIND_COLOR: Record<string, number> = { enemy: 0xff5a5a, loot: 0x4ec6ff, go: 0xffffff, danger: 0xff8a3a };
+const PING_KIND_LABEL: Record<string, string> = { enemy: 'ENEMY', loot: 'LOOT', go: 'GO', danger: '!' };
+
 const DEPTH_FLOOR = -3;
 const DEPTH_BLOOD = -2;
 const DEPTH_DARK = 10;
@@ -224,6 +228,10 @@ export class GameScene extends Phaser.Scene {
   private codStatus!: Phaser.GameObjects.Text; // active power-up timers
   private powerupNodes = new Map<number, { g: Phaser.GameObjects.Star; t: Phaser.GameObjects.Text }>();
   private boxRevealIcon!: Phaser.GameObjects.Image;
+  // co-op ping markers (world-space, pooled by ping id) + teammate status + off-screen threat arrows
+  private pingNodes = new Map<number, { chevron: Phaser.GameObjects.Triangle; dot: Phaser.GameObjects.Arc; label: Phaser.GameObjects.Text }>();
+  private teammateHud = new Map<number, { back: Phaser.GameObjects.Rectangle; fill: Phaser.GameObjects.Rectangle; name: Phaser.GameObjects.Text }>();
+  private threatArrows = new Map<number, Phaser.GameObjects.Triangle>();
 
   constructor() {
     super('game');
@@ -1086,6 +1094,124 @@ export class GameScene extends Phaser.Scene {
     this.minimapDot.clear();
     this.minimapDot.fillStyle(0xe8eaed, 1);
     this.minimapDot.fillCircle(mx + p.pos.x * scale, my + p.pos.y * scale, 2.4);
+    // co-op ping blips on the minimap, kind-coloured, fading with the ping's ttl
+    for (const pg of this.state.pings) {
+      this.minimapDot.fillStyle(PING_KIND_COLOR[pg.kind] ?? 0xffffff, Math.min(1, pg.ttl / 1.2));
+      this.minimapDot.fillCircle(mx + pg.x * scale, my + pg.y * scale, 2);
+    }
+  }
+
+  /**
+   * World-space co-op ping markers: a kind-coloured chevron + dot tinted with the
+   * owner's TEAM_TINT and a short label, bobbing and fading as the ping's ttl runs
+   * out. Pooled by ping id; nothing lingers once the ping expires on the sim side.
+   */
+  private syncPings(): void {
+    const seen = new Set<number>();
+    const t = this.state.time;
+    for (const p of this.state.pings) {
+      seen.add(p.id);
+      const kc = PING_KIND_COLOR[p.kind] ?? 0xffffff;
+      const oc = TEAM_TINT[p.owner % 4];
+      let node = this.pingNodes.get(p.id);
+      if (!node) {
+        // chevron points DOWN at the pinged spot; label sits above it
+        const chevron = this.add.triangle(p.x, p.y, 0, 0, 16, 0, 8, 13, kc, 1).setDepth(DEPTH_HUD - 4);
+        const dot = this.add.circle(p.x, p.y, 5, kc, 0.85).setStrokeStyle(2, oc, 1).setDepth(DEPTH_HUD - 4);
+        const label = this.add
+          .text(p.x, p.y, PING_KIND_LABEL[p.kind] ?? '', { fontFamily: 'monospace', fontSize: '11px', fontStyle: 'bold' })
+          .setOrigin(0.5, 1)
+          .setDepth(DEPTH_HUD - 4);
+        node = { chevron, dot, label };
+        this.pingNodes.set(p.id, node);
+      }
+      const bob = Math.sin(t * 5 + p.id) * 3;
+      const a = Math.min(1, p.ttl / 1.2); // fade out over the final ~1.2s
+      const cc = '#' + kc.toString(16).padStart(6, '0');
+      node.chevron.setPosition(p.x, p.y - 22 + bob).setFillStyle(kc).setAlpha(a);
+      node.dot.setPosition(p.x, p.y).setStrokeStyle(2, oc, a).setAlpha(a * 0.85);
+      node.label.setPosition(p.x, p.y - 30 + bob).setText(PING_KIND_LABEL[p.kind] ?? '').setColor(cc).setAlpha(a);
+    }
+    for (const [id, n] of this.pingNodes) {
+      if (!seen.has(id)) {
+        n.chevron.destroy();
+        n.dot.destroy();
+        n.label.destroy();
+        this.pingNodes.delete(id);
+      }
+    }
+  }
+
+  /**
+   * Teammate status floating above each co-op ally: a small health bar in the
+   * slot tint, a slot tag, and a clear DOWN / REVIVING indicator. Pooled by slot;
+   * only drawn in co-op (players.length > 1). World-space so it tracks the ally.
+   */
+  private drawTeammateStatus(i: number, pl: PlayerState, px: number, py: number): void {
+    let hud = this.teammateHud.get(i);
+    if (!hud) {
+      const back = this.add.rectangle(0, 0, 46, 5, 0x1a0505, 0.85).setDepth(DEPTH_HUD - 5);
+      const fill = this.add.rectangle(0, 0, 46, 5, 0x4bd06a, 1).setOrigin(0, 0.5).setDepth(DEPTH_HUD - 5);
+      const name = this.add
+        .text(0, 0, '', { fontFamily: 'monospace', fontSize: '10px', fontStyle: 'bold' })
+        .setOrigin(0.5, 1)
+        .setDepth(DEPTH_HUD - 5);
+      hud = { back, fill, name };
+      this.teammateHud.set(i, hud);
+    }
+    const tint = TEAM_TINT[i % 4];
+    const cc = '#' + tint.toString(16).padStart(6, '0');
+    const by = py - 32;
+    const frac = Math.max(0, Math.min(1, pl.hp / effectiveMaxHp(this.state)));
+    hud.back.setPosition(px, by).setVisible(true);
+    hud.fill.setPosition(px - 23, by).setVisible(true);
+    hud.fill.width = 46 * frac;
+    hud.fill.setFillStyle(pl.downed ? 0x6a1418 : frac < 0.3 ? 0xc23b3b : 0x4bd06a);
+    const label = pl.downed
+      ? pl.reviveProgress > 0
+        ? `REVIVING ${Math.floor(pl.reviveProgress * 100)}%`
+        : 'DOWN'
+      : `P${i + 1}`;
+    hud.name.setPosition(px, by - 5).setText(label).setColor(pl.downed ? '#ff6b80' : cc).setVisible(true);
+  }
+
+  /**
+   * Screen-edge arrows pointing toward OFF-SCREEN heavy threats — bosses (bloater/
+   * screamer + any boss) and hellhounds — so the squad gets warned before they
+   * arrive. Kept in solo too. Pooled per enemy id, capped so a dog round can't
+   * ring the whole screen.
+   */
+  private updateThreatArrows(): void {
+    const view = this.cameras.main.worldView;
+    const lp = this.local();
+    const threats = this.state.enemies
+      .filter((e) => (e.boss || e.type === 'hound') && !view.contains(e.pos.x, e.pos.y))
+      .sort(
+        (a, b) =>
+          (a.pos.x - lp.pos.x) ** 2 + (a.pos.y - lp.pos.y) ** 2 - ((b.pos.x - lp.pos.x) ** 2 + (b.pos.y - lp.pos.y) ** 2),
+      )
+      .slice(0, 8);
+    const seen = new Set<number>();
+    for (const e of threats) {
+      seen.add(e.id);
+      const ang = Math.atan2(e.pos.y - lp.pos.y, e.pos.x - lp.pos.x);
+      const ax = 480 + Math.cos(ang) * 430;
+      const ay = 270 + Math.sin(ang) * 235;
+      const color = e.boss ? 0xff8a3a : 0xff5a5a;
+      let arrow = this.threatArrows.get(e.id);
+      if (!arrow) {
+        arrow = this.add.triangle(0, 0, 0, 16, 22, 16, 11, 0, color, 0.92).setScrollFactor(0).setDepth(DEPTH_HUD + 1);
+        this.threatArrows.set(e.id, arrow);
+      }
+      const pulse = e.boss ? 0.75 + 0.25 * Math.sin(this.state.time * 8) : 0.9;
+      arrow.setPosition(ax, ay).setRotation(ang + Math.PI / 2).setFillStyle(color).setAlpha(pulse).setVisible(true);
+    }
+    for (const [id, arrow] of this.threatArrows) {
+      if (!seen.has(id)) {
+        arrow.destroy();
+        this.threatArrows.delete(id);
+      }
+    }
   }
 
   private renderState(alpha: number, dt: number): void {
@@ -1157,6 +1283,9 @@ export class GameScene extends Phaser.Scene {
         ring.setVisible(false);
       }
 
+      // co-op teammate status floats above each ally (health bar + slot tag + downed state)
+      if (players.length > 1 && !isLocal) this.drawTeammateStatus(i, pl, px, py);
+
       if (isLocal && src.dash.timeLeft > 0) {
         this.dashGhostCd -= dt;
         if (this.dashGhostCd <= 0) {
@@ -1170,6 +1299,14 @@ export class GameScene extends Phaser.Scene {
     for (const [i, s] of this.playerBodies) if (!seenP.has(i)) (s.destroy(), this.playerBodies.delete(i));
     for (const [i, s] of this.playerWeapons) if (!seenP.has(i)) (s.destroy(), this.playerWeapons.delete(i));
     for (const [i, s] of this.reviveRings) if (!seenP.has(i)) (s.destroy(), this.reviveRings.delete(i));
+    // retire teammate-status huds for slots no longer shown (solo, local, or dead)
+    for (const [i, hud] of this.teammateHud) {
+      if (players.length > 1 && i !== this.localIndex && players[i]?.alive) continue;
+      hud.back.destroy();
+      hud.fill.destroy();
+      hud.name.destroy();
+      this.teammateHud.delete(i);
+    }
 
     // Darkness: every standing player's flashlight cone + glow cuts it (screen-space).
     const cam = this.cameras.main;
@@ -1364,6 +1501,8 @@ export class GameScene extends Phaser.Scene {
     this.updateDraftUI();
     this.updateExtractionHud(dt);
     this.updateCodRender();
+    this.syncPings(); // world-space co-op ping markers
+    this.updateThreatArrows(); // screen-edge arrows toward off-screen bosses/hounds
 
     if (this.state.gameOver && !this.overlay) {
       const won = this.state.won;

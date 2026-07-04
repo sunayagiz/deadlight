@@ -49,6 +49,8 @@ export function createGameState(
     nextEnemyId: 1,
     loot: [],
     nextLootId: 1,
+    pings: [],
+    nextPingId: 1,
     wave: {
       index: 1,
       phase: 'intermission', // start with a short breather before wave 1
@@ -102,5 +104,6 @@ export function emptyInput(): PlayerInput {
     reroll: false,
     banish: -1,
     use: false,
+    ping: null,
   };
 }

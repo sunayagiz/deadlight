@@ -19,6 +19,20 @@ export interface PlayerInput {
   reroll: boolean; // reroll the current perk draft for cash this tick (intermission only)
   banish: number; // banish draft option i (0..PERK_CHOICES-1) from the run's pool; -1 = none
   use: boolean; // interact with the nearest buyable (door/box/PaP/wall/power) this tick
+  ping: { x: number; y: number } | null; // world point the player pinged this tick; null = no ping
+}
+
+/** Apex-style ping kind — auto-chosen by the host from what's near the ping point. */
+export type PingKind = 'enemy' | 'loot' | 'go' | 'danger';
+
+/** A live co-op ping in the world. Host-authoritative, serialized so every client renders it. */
+export interface PingState {
+  id: number;
+  x: number;
+  y: number;
+  kind: PingKind;
+  owner: number; // player slot that placed it (drives the TEAM_TINT)
+  ttl: number; // seconds left before it fades out
 }
 
 export type WeaponId =
@@ -209,6 +223,8 @@ export interface GameState {
   nextEnemyId: number;
   loot: LootState[];
   nextLootId: number;
+  pings: PingState[]; // active co-op pings (host-authoritative, serialized)
+  nextPingId: number;
   wave: WaveState;
   spawnZones: SpawnZone[];
   walls: Wall[];

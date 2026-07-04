@@ -8,6 +8,7 @@ import { getFlowField } from './flowfield';
 import { updateLoot } from './loot';
 import { mapSolids, updateDoors } from './map';
 import { updateMelee } from './melee';
+import { updatePings } from './ping';
 import { updateCrawl, updateDash, updateMovement } from './movement';
 import { banishPerk, choosePerk, effectiveMaxHp, regenPerSec, rerollDraft, speedMult } from './perks';
 import { buy } from './shop';
@@ -72,6 +73,7 @@ export function stepSim(
   });
 
   updateInteractions(state, list, rng); // pay-doors + Mystery Box / PaP / wall / power
+  updatePings(state, list, dt); // co-op pings: age out + fold this tick's ping actions in
   updateRevives(state, list, dt); // bleedout + teammate revives
   updateEnemies(state.enemies, state.players, solids, dt, flow, enemySpeedScale(state.wave.index));
   updateRangedEnemies(state, dt); // spitters lob acid

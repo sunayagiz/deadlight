@@ -5,6 +5,7 @@ import type {
   GameState,
   Interactable,
   LootState,
+  PingState,
   PlayerState,
   PowerUp,
   WaveState,
@@ -23,6 +24,8 @@ export interface Snapshot {
   enemies: EnemyState[];
   bullets: BulletState[];
   loot: LootState[];
+  pings: PingState[]; // active co-op pings
+  npi: number; // nextPingId
   doors: boolean[]; // open flags, index-aligned with state.doors
   wave: WaveState;
   nb: number; // nextBulletId
@@ -57,6 +60,8 @@ export function snapshot(s: GameState): Snapshot {
     enemies: s.enemies,
     bullets: s.bullets,
     loot: s.loot,
+    pings: s.pings,
+    npi: s.nextPingId,
     doors: s.doors.map((d) => d.open),
     wave: s.wave,
     nb: s.nextBulletId,
@@ -93,6 +98,8 @@ export function applySnapshot(s: GameState, snap: Snapshot): void {
   s.enemies = snap.enemies;
   s.bullets = snap.bullets;
   s.loot = snap.loot;
+  s.pings = snap.pings;
+  s.nextPingId = snap.npi;
   snap.doors.forEach((open, i) => {
     if (s.doors[i]) s.doors[i].open = open;
   });
