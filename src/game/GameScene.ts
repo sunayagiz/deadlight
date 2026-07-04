@@ -68,7 +68,7 @@ const DEPTH_HUD = 20;
 
 const ASSETS = [
   'player', 'shambler', 'runner', 'brute', 'bloater', 'screamer', 'hound',
-  'spitter', 'boomer', 'stalker',
+  'spitter', 'boomer', 'stalker', 'armored',
   'wpn_pistol', 'wpn_smg', 'wpn_shotgun', 'wpn_machinegun', 'wpn_minigun',
   'wpn_rpg', 'wpn_katana', 'wpn_bat', 'wpn_chainsaw', 'wpn_raygun',
   'crate', 'ammo', 'health', 'muzzle', 'explosion', 'rocket', 'blood',
@@ -274,9 +274,9 @@ export class GameScene extends Phaser.Scene {
       this.state.player.ammo[id] = 999;
     }
     if (qs.get('zoo')) {
-      const types = ['shambler', 'runner', 'brute', 'bloater', 'screamer', 'hound', 'spitter', 'boomer', 'stalker'] as const;
+      const types = ['shambler', 'runner', 'brute', 'bloater', 'screamer', 'hound', 'spitter', 'boomer', 'stalker', 'armored'] as const;
       types.forEach((t, i) =>
-        spawnEnemy(this.state, t, { x: map.playerStart.x - 380 + i * 95, y: map.playerStart.y - 200 }),
+        spawnEnemy(this.state, t, { x: map.playerStart.x - 420 + i * 95, y: map.playerStart.y - 200 }),
       );
       this.state.wave.phase = 'active'; // active so no shop overlay hides the lineup
       this.state.wave.spawnQueue = [];
@@ -821,15 +821,25 @@ export class GameScene extends Phaser.Scene {
     if (p.dash.timeLeft > this.prevDashLeft + 0.05) this.sfx('whoosh', 0.3, 1.4);
     this.prevDashLeft = p.dash.timeLeft;
 
-    // fresh bullet hits → squelch + arterial spray (cap one sound per frame)
+    // fresh hits → armored bodies SPARK (bullets ping off), everything else bleeds
     let squelched = false;
     for (const e of this.state.enemies) {
       if (e.hitFlash > 0.065) {
+        const dir = Math.atan2(e.vel.y, e.vel.x) + Math.PI; // roughly away from the shot
+        if (e.type === 'armored') {
+          // metallic sparks — a clear "guns barely work, melee it" cue
+          for (let i = 0; i < 5; i++) {
+            const a = dir + (Math.random() - 0.5) * 2.2;
+            const dist = 14 + Math.random() * 30;
+            const spark = this.getCircle(e.pos.x, e.pos.y, 1 + Math.random() * 1.6, Math.random() < 0.5 ? 0xffe27a : 0xfff2c0, 1, 3);
+            this.tweens.add({ targets: spark, x: e.pos.x + Math.cos(a) * dist, y: e.pos.y + Math.sin(a) * dist, alpha: 0, duration: 120 + Math.random() * 90, onComplete: () => this.freeCircle(spark) });
+          }
+          continue;
+        }
         if (!squelched) {
           this.sfx('squelch', 0.5, 0.9 + Math.random() * 0.3);
           squelched = true;
         }
-        const dir = Math.atan2(e.vel.y, e.vel.x) + Math.PI; // roughly away from the shot
         for (let i = 0; i < 6; i++) {
           const a = dir + (Math.random() - 0.5) * 2.4;
           const dist = 20 + Math.random() * 44;

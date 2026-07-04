@@ -91,7 +91,8 @@ export type EnemyType =
   | 'hound'
   | 'spitter' // ranged: keeps its distance and lobs acid
   | 'boomer' // fast rusher that explodes on death
-  | 'stalker'; // lean lurker that periodically lunges
+  | 'stalker' // lean lurker that periodically lunges
+  | 'armored'; // riot-plated: shrugs off bullets, cut down only by melee
 
 /** A fixed buyable in the world (COD-style): doors, Mystery Box, Pack-a-Punch, wall guns, power. */
 export type InteractKind = 'mysterybox' | 'packapunch' | 'wallbuy' | 'power';

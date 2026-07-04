@@ -77,9 +77,10 @@ function explode(state: GameState, at: Vec2, radius: number, damage: number, own
     const dx = e.pos.x - at.x;
     const dy = e.pos.y - at.y;
     if (dx * dx + dy * dy <= r2) {
-      e.hp -= damage;
+      const dealt = damage * (1 - (ZOMBIES[e.type].bulletResist ?? 0)); // armor resists blasts too
+      e.hp -= dealt;
       e.hitFlash = HIT_FLASH;
-      applyLifesteal(state, shooter, damage);
+      applyLifesteal(state, shooter, dealt);
     }
   }
   for (const p of state.players) {
@@ -118,10 +119,12 @@ export function updateCombat(state: GameState, dt: number, rng: () => number = M
     } else {
       const hit = firstEnemyHit(state, b);
       if (hit) {
-        if (state.instaKillT > 0 && !hit.boss) hit.hp = 0; // Insta-Kill power-up
-        else hit.hp -= b.damage;
+        // armored bodies shrug off bullets — melee is the answer
+        const dealt = b.damage * (1 - (ZOMBIES[hit.type].bulletResist ?? 0));
+        if (state.instaKillT > 0 && !hit.boss) hit.hp = 0; // Insta-Kill power-up ignores armor
+        else hit.hp -= dealt;
         hit.hitFlash = HIT_FLASH;
-        applyLifesteal(state, state.players[b.owner], b.damage); // leech perk credit
+        applyLifesteal(state, state.players[b.owner], dealt); // leech perk credit
         if (hit.hp > 0) state.cash += Math.round(CASH_PER_HIT * cashMult(state)); // COD points-per-hit
         // Shove along the bullet's travel direction; heavier bodies budge less.
         const vlen = Math.hypot(b.vel.x, b.vel.y);

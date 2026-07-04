@@ -67,6 +67,7 @@ function affordable(index: number, budget: number): EnemyType[] {
   const pool: EnemyType[] = ['shambler', 'runner'];
   if (index >= BRUTE_MIN_WAVE) pool.push('brute');
   if (index >= 4) pool.push('boomer'); // explodes on death
+  if (index >= 4) pool.push('armored'); // melee-only threat — regular reason to swing
   if (index >= 5) pool.push('spitter'); // ranged acid
   if (index >= 6) pool.push('stalker'); // lunging lurker
   return pool.filter((t) => ZOMBIES[t].cost <= budget);
@@ -91,6 +92,8 @@ function weightFor(type: EnemyType, index: number): number {
       return 0.25 + index * 0.05;
     case 'stalker':
       return 0.25 + index * 0.05;
+    case 'armored':
+      return 0.4 + index * 0.06; // steady presence so melee stays relevant
     default:
       return 1;
   }

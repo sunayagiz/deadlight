@@ -1,4 +1,4 @@
-import { PAP_DMG_MULT } from '../config';
+import { ARMOR_MELEE_BONUS, PAP_DMG_MULT } from '../config';
 import { ZOMBIES } from './enemies';
 import { applyLifesteal, damageMult } from './perks';
 import { WEAPONS, type WeaponDef } from './weapons';
@@ -23,9 +23,11 @@ function hitArc(state: GameState, p: PlayerState, def: WeaponDef, damage: number
     const reach = (def.range ?? 0) + ZOMBIES[e.type].radius;
     if (dx * dx + dy * dy > reach * reach) continue;
     if (Math.abs(angleDiff(Math.atan2(dy, dx), p.aimAngle)) > (def.arc ?? 0)) continue;
-    e.hp -= damage;
+    // melee bypasses armor entirely and gets a bonus against it — the intended answer
+    const dmg = damage * (ZOMBIES[e.type].bulletResist ? ARMOR_MELEE_BONUS : 1);
+    e.hp -= dmg;
     e.hitFlash = HIT_FLASH;
-    applyLifesteal(state, p, damage); // leech perk credit
+    applyLifesteal(state, p, dmg); // leech perk credit
   }
 }
 

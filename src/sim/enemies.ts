@@ -68,6 +68,7 @@ export interface EnemyDef {
   contactDamage: number; // damage-per-second while touching a player
   cost: number; // wave-budget cost (0 for bosses; they are spawned directly)
   boss?: boolean;
+  bulletResist?: number; // 0..1 fraction of NON-melee damage ignored (armored → melee it)
 }
 
 /** Data-driven enemy table (design spec / slice-2 spec). New enemy = new row, not a new class. */
@@ -85,6 +86,8 @@ export const ZOMBIES: Record<EnemyType, EnemyDef> = {
   boomer: { type: 'boomer', name: 'Boomer', hp: 70, speed: 118, radius: 16, contactDamage: 14, cost: 3 },
   // Stalker — lean lurker that periodically lunges across the gap.
   stalker: { type: 'stalker', name: 'Stalker', hp: 55, speed: 98, radius: 11, contactDamage: 20, cost: 3 },
+  // Armored — riot-plated: bullets ping off (75% resisted), melee cuts it down.
+  armored: { type: 'armored', name: 'Armored', hp: 110, speed: 62, radius: 15, contactDamage: 22, cost: 4, bulletResist: 0.75 },
 };
 
 export function isBoss(type: EnemyType): boolean {

@@ -45,6 +45,7 @@ export const STALKER_LUNGE_CD = 3.2; // s between lunges
 export const STALKER_LUNGE_TIME = 0.28; // s the lunge dash lasts
 export const STALKER_LUNGE_SPEED = 470; // px/s during a lunge
 export const SPAWN_JITTER = 46; // px: random offset around a spawn zone so spawns don't stack
+export const ARMOR_MELEE_BONUS = 1.35; // melee damage multiplier vs armored enemies (melee is the answer)
 
 // --- Loot ---
 export const LOOT_DROP_CHANCE = 0.22; // chance a killed enemy drops something

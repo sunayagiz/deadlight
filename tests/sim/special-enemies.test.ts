@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { PLAYER_MAX_HP, SIM_DT, STALKER_LUNGE_SPEED } from '../../src/config';
+import { ARMOR_MELEE_BONUS, PLAYER_MAX_HP, SIM_DT, STALKER_LUNGE_SPEED } from '../../src/config';
 import { updateCombat } from '../../src/sim/combat';
-import { spawnEnemy, updateEnemies, updateRangedEnemies } from '../../src/sim/enemies';
+import { spawnEnemy, updateEnemies, updateRangedEnemies, ZOMBIES } from '../../src/sim/enemies';
+import { updateMelee } from '../../src/sim/melee';
 import { createGameState, emptyInput } from '../../src/sim/state';
 import { stepSim } from '../../src/sim/step';
-import type { GameState } from '../../src/sim/types';
+import type { BulletState, GameState } from '../../src/sim/types';
 
 function fresh(): GameState {
   return createGameState([], [{ x: 0, y: 0 }], [], { x: 500, y: 500 }, { width: 4000, height: 4000 }, 1);
@@ -62,6 +63,33 @@ describe('stalker (lunge)', () => {
     const speed = Math.hypot(st.vel.x, st.vel.y);
     expect(speed).toBeGreaterThan(STALKER_LUNGE_SPEED * 0.9); // moving fast, toward the player (-x)
     expect(st.vel.x).toBeLessThan(0);
+  });
+});
+
+describe('armored (melee-only)', () => {
+  function bullet(x: number, y: number, dmg: number): BulletState {
+    return { id: 1, pos: { x, y }, vel: { x: 100, y: 0 }, ttl: 1, damage: dmg, splashRadius: 0, splashDamage: 0, hostile: false, owner: 0 };
+  }
+
+  it('shrugs off most bullet damage (75% resisted)', () => {
+    const s = fresh();
+    const a = spawnEnemy(s, 'armored', { x: 600, y: 500 });
+    const hp0 = a.hp;
+    s.bullets.push(bullet(600, 500, 100));
+    updateCombat(s, SIM_DT, () => 0.99);
+    expect(hp0 - a.hp).toBeCloseTo(100 * (1 - ZOMBIES.armored.bulletResist!)); // only 25 dealt
+  });
+
+  it('takes full melee damage plus a bonus', () => {
+    const s = fresh();
+    const a = spawnEnemy(s, 'armored', { x: 550, y: 500 }); // in front, within katana reach
+    const p = s.players[0];
+    p.weapon = 'katana';
+    p.aimAngle = 0; // facing +x toward the enemy
+    const hp0 = a.hp;
+    updateMelee(s, p, { ...emptyInput(), fire: true }, SIM_DT);
+    // katana base 70 × ARMOR_MELEE_BONUS, no perks/PaP
+    expect(hp0 - a.hp).toBeCloseTo(70 * ARMOR_MELEE_BONUS);
   });
 });
 
