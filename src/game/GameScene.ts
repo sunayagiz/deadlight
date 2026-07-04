@@ -28,6 +28,7 @@ import { hashSeed, mulberry32 } from '../sim/rng';
 import { createGameState } from '../sim/state';
 import { stepSim } from '../sim/step';
 import { recordScore } from './scores';
+import { affixTint, getSettings, powerupColor, scaledFlash, scaledShake, type Settings } from './settings';
 import { applyLoadout } from './loadouts';
 import { addCurrency, runReward } from './profile';
 import { lerp } from '../sim/vec';
@@ -35,7 +36,7 @@ import { segmentClear } from '../sim/vision';
 import { updateAim } from '../sim/weapons';
 import { updateDash, updateMovement } from '../sim/movement';
 import { WEAPONS } from '../sim/weapons';
-import { isUp, type Door, type EnemyType, type GameState, type PlayerInput, type PlayerState, type WeaponId } from '../sim/types';
+import { isUp, type AffixId, type Door, type EnemyType, type GameState, type PlayerInput, type PlayerState, type WeaponId } from '../sim/types';
 
 /** Static base for runtime asset URLs so the build works under any deploy path. */
 const ASSET_BASE = import.meta.env.BASE_URL;
@@ -93,6 +94,13 @@ const PU_STYLE: Record<string, { c: number; s: string }> = {
   doublepoints: { c: 0xffcf4e, s: 'x2' },
   firesale: { c: 0x8affa0, s: 'SALE' },
 };
+
+/**
+ * Colour-blind aid: a short letter tag drawn on each elite aura so affixes are
+ * distinguishable WITHOUT relying on hue (info is never colour-only).
+ * S=Swift · T=Tank · D=shielDed · B=Blast (volatile) · V=Vampiric.
+ */
+const AFFIX_TAG: Record<AffixId, string> = { swift: 'S', tank: 'T', shielded: 'D', volatile: 'B', vampiric: 'V' };
 
 /** Co-op ping styling: kind → marker colour + short emoji-free label. */
 const PING_KIND_COLOR: Record<string, number> = { enemy: 0xff5a5a, loot: 0x4ec6ff, go: 0xffffff, danger: 0xff8a3a };
@@ -182,6 +190,8 @@ export class GameScene extends Phaser.Scene {
   private rocketSprites = new Map<number, Phaser.GameObjects.Image>();
   private enemySprites = new Map<number, Phaser.GameObjects.Image>();
   private affixAuras = new Map<number, Phaser.GameObjects.Arc>(); // faint elite glow behind affixed enemies
+  private affixTags = new Map<number, Phaser.GameObjects.Text>(); // letter tag on each elite aura (colour-blind aid: never colour-only)
+  private hcOutlines = new Map<number, Phaser.GameObjects.Arc>(); // high-contrast: bright ring around every on-screen enemy
   private dangerAuras = new Map<number, Phaser.GameObjects.Arc>(); // pulsing "about to blow" rings behind boomers / volatile elites
   private chargingIds = new Set<number>(); // enemies mid wind-up last frame, so we sound the tension cue only on the rising edge
   private volatileIds = new Set<number>(); // volatile elites, so their death fires the boomer blast fx
@@ -197,6 +207,14 @@ export class GameScene extends Phaser.Scene {
   private dashGhostCd = 0;
   private hurtFx = 0;
   private hurtOverlay!: Phaser.GameObjects.Rectangle;
+  // Accessibility settings (render-layer, localStorage). Loaded once in create()
+  // — they change only in the lobby, never mid-run, so no netcode/determinism risk.
+  private settings: Settings = { colorblind: 'off', captions: true, shake: 1, flash: 1, highContrast: false };
+  // Captions: a small pooled stack of fading lines under the HUD for key audio cues.
+  private captionRoot!: Phaser.GameObjects.Container;
+  private captionLines: { t: Phaser.GameObjects.Text; life: number; max: number }[] = [];
+  private captionLast = ''; // dedupe: suppress the same caption fired again immediately
+  private captionLastAt = -1;
   private downOverlay!: Phaser.GameObjects.Rectangle; // desaturating vignette while the local player is downed
   private downedHud!: Phaser.GameObjects.Text; // centered "GET UP" / self-revive prompt when downed
   private zedOverlay!: Phaser.GameObjects.Rectangle; // A9: cool-blue vignette while Zed-Time is active
@@ -204,6 +222,8 @@ export class GameScene extends Phaser.Scene {
   private zedMeterFill!: Phaser.GameObjects.Rectangle; // A9: charge-meter fill
   private zedMeterLabel!: Phaser.GameObjects.Text; // A9: "ZED n%" / "[X] READY" / countdown
   private prevZedActive = false; // A9: rising-edge detect to pop the activation flash
+  private prevNotice = ''; // rising-edge detect for announcer callouts → captions
+  private prevBossCount = 0; // rising-edge detect for boss spawns → caption
   private prevHp = 0;
   private prevWavePhase = '';
   private prevOpenDoors = 0;
@@ -306,6 +326,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   create(): void {
+    this.settings = getSettings(); // accessibility prefs (shake/flash/colour-blind/captions/contrast)
     const map = buildMap();
     const session = getSession();
     this.role = session.role;
@@ -551,10 +572,15 @@ export class GameScene extends Phaser.Scene {
     this.extractBarFill = this.add.rectangle(480 - 180, 96, 360, 14, 0x38ffb0).setOrigin(0, 0.5).setScrollFactor(0).setDepth(DEPTH_HUD).setVisible(false);
     this.extractLabel = this.add.text(480, 74, '', { fontFamily: 'monospace', fontSize: '14px', color: '#8affbf', fontStyle: 'bold' }).setOrigin(0.5).setScrollFactor(0).setDepth(DEPTH_HUD).setVisible(false);
 
+    // Captions: a bottom-centre stack of fading lines (built even when off; the
+    // caption() call is gated so nothing is added unless the setting is on).
+    this.captionRoot = this.add.container(0, 0).setScrollFactor(0).setDepth(DEPTH_HUD + 2);
+
     this.buildShopUI();
     this.buildDraftUI();
     this.buildCodRender();
     this.buildDeployUI();
+    this.applyHighContrastHud(); // brighten HP bar + HUD text when high-contrast is on
 
     // All sound (SFX + music) loads in the background now that the scene is up.
     this.loadAudioDeferred();
@@ -598,9 +624,73 @@ export class GameScene extends Phaser.Scene {
    * frame as a shotgun blast would stomp the big shake down to nothing.
    */
   private kickCamera(duration: number, intensity: number): void {
+    const i = scaledShake(intensity, this.settings); // accessibility: 0 = no shake
+    if (i <= 0) return;
     const eff = this.cameras.main.shakeEffect;
-    if (eff.isRunning && eff.intensity.x >= intensity) return;
-    this.cameras.main.shake(duration, intensity);
+    if (eff.isRunning && eff.intensity.x >= i) return;
+    this.cameras.main.shake(duration, i);
+  }
+
+  /**
+   * Forced camera shake (explosions / big hits) that still honours the
+   * accessibility shake multiplier. Every shake in the game routes through here
+   * or kickCamera, so `shake = 0` reliably removes ALL screen-shake.
+   */
+  private shakeCam(duration: number, intensity: number): void {
+    const i = scaledShake(intensity, this.settings);
+    if (i <= 0) return;
+    this.cameras.main.shake(duration, i);
+  }
+
+  /** High-contrast: brighten the HP bar + core HUD text for low-vision / high-glare play. */
+  private applyHighContrastHud(): void {
+    if (!this.settings.highContrast) return;
+    this.hpFill.setFillStyle(0xff4d4d);
+    this.hud.setColor('#ffffff');
+    this.weaponHud.setColor('#ffe14a');
+    this.cashHud.setColor('#b6ffce');
+  }
+
+  /**
+   * Caption a key non-speech audio cue (e.g. "[explosion]"). No-op unless the
+   * captions setting is on. Fired from the SAME render events that play the
+   * sound, so audio-only information is mirrored on screen. Deduped (the same
+   * caption within a short window is suppressed), time-limited and pooled into a
+   * bottom-centre stack of at most a few fading lines.
+   */
+  private caption(text: string): void {
+    if (!this.settings.captions) return;
+    const now = this.state ? this.state.time : 0;
+    if (text === this.captionLast && now - this.captionLastAt < 0.9) return; // dedupe rapid repeats
+    this.captionLast = text;
+    this.captionLastAt = now;
+    const t = this.add
+      .text(0, 0, text, { fontFamily: 'monospace', fontSize: '15px', color: '#e8eef2', fontStyle: 'bold', backgroundColor: '#000a', align: 'center' })
+      .setOrigin(0.5, 1)
+      .setPadding(8, 4, 8, 4)
+      .setAlpha(0.98);
+    this.captionRoot.add(t);
+    this.captionLines.push({ t, life: 2.6, max: 2.6 });
+    while (this.captionLines.length > 4) this.captionLines.shift()!.t.destroy(); // pool cap
+  }
+
+  /** Age caption lines: fade over their lifetime and stack upward from the bottom. */
+  private updateCaptions(dt: number): void {
+    if (this.captionLines.length === 0) return;
+    const baseY = 470; // just under the HUD, above the mobile touch zone
+    let y = baseY;
+    for (let i = this.captionLines.length - 1; i >= 0; i--) {
+      const line = this.captionLines[i];
+      line.life -= dt;
+      if (line.life <= 0) {
+        line.t.destroy();
+        this.captionLines.splice(i, 1);
+        continue;
+      }
+      const fade = Math.min(1, line.life / 0.5); // fade out over the last 0.5s
+      line.t.setPosition(480, y).setAlpha(0.98 * fade);
+      y -= 22;
+    }
   }
 
   /** Route a click to a shop row or a perk card (screen-space). */
@@ -893,9 +983,12 @@ export class GameScene extends Phaser.Scene {
       if (door) prompt = `[F] Open Door — $${door.cost}`;
     }
     this.codPrompt.setText(prompt).setVisible(prompt !== '');
-    // announcer banner
-    if (s.noticeT > 0 && s.notice) this.codNotice.setText(s.notice).setVisible(true).setAlpha(Math.min(1, s.noticeT));
-    else this.codNotice.setVisible(false);
+    // announcer banner (+ caption its callouts on the rising edge, e.g. "[MAX AMMO]")
+    if (s.noticeT > 0 && s.notice) {
+      this.codNotice.setText(s.notice).setVisible(true).setAlpha(Math.min(1, s.noticeT));
+      if (s.notice !== this.prevNotice) this.caption(`[${s.notice}]`);
+    } else this.codNotice.setVisible(false);
+    this.prevNotice = s.noticeT > 0 ? s.notice : '';
     // active power-up timers + power state
     const chips: string[] = [];
     if (s.instaKillT > 0) chips.push(`INSTA-KILL ${Math.ceil(s.instaKillT)}s`);
@@ -913,9 +1006,10 @@ export class GameScene extends Phaser.Scene {
     for (const pu of this.state.powerups) {
       seen.add(pu.id);
       const style = PU_STYLE[pu.kind] ?? { c: 0xffffff, s: '?' };
+      const puColor = powerupColor(pu.kind, style.c, this.settings.colorblind); // colour-blind-safe remap
       let node = this.powerupNodes.get(pu.id);
       if (!node) {
-        const g = this.add.star(pu.x, pu.y, 5, 7, 16, style.c, 0.95).setDepth(1);
+        const g = this.add.star(pu.x, pu.y, 5, 7, 16, puColor, 0.95).setDepth(1);
         const tx = this.add
           .text(pu.x, pu.y, style.s, { fontFamily: 'monospace', fontSize: '10px', color: '#101010', fontStyle: 'bold' })
           .setOrigin(0.5).setDepth(2);
@@ -1058,23 +1152,29 @@ export class GameScene extends Phaser.Scene {
       this.hurtFx = Math.min(1, this.hurtFx + lost * 0.08);
       if (lost > 1) this.hurtFx = Math.max(this.hurtFx, 0.5); // any real hit pops clearly
       if (lost > 2) {
-        this.cameras.main.shake(110, 0.005);
+        this.shakeCam(110, 0.005);
         this.sfx('hurt', 0.55);
+        this.caption('[hurt]');
       }
     }
     this.prevHp = p.hp;
     this.hurtFx = Math.max(0, this.hurtFx - dt * 2.0);
-    this.hurtOverlay.setFillStyle(0xff1414, this.hurtFx * 0.5); // bright red, readable
+    // Red damage vignette, scaled by the flash setting (0 = no red flash — photosensitivity).
+    this.hurtOverlay.setFillStyle(0xff1414, scaledFlash(this.hurtFx * 0.5, this.settings));
 
     // A9: Zed-Time — cool-blue slow-mo vignette + a one-shot pop on activation.
     const zedActive = this.state.zedTime > 0;
     if (zedActive && !this.prevZedActive) {
-      this.cameras.main.flash(180, 30, 90, 200); // cool blue pop
+      // Full-screen activation flash, dimmed by the flash setting (skipped entirely at 0).
+      const ff = scaledFlash(1, this.settings);
+      if (ff > 0) this.cameras.main.flash(180, Math.round(30 * ff), Math.round(90 * ff), Math.round(200 * ff));
       this.sfx('whoosh', 0.6, 0.7); // deep, pitched-down time-dilation whoosh
+      this.caption('[zed-time]');
       this.lightPulses.push({ x: p.pos.x, y: p.pos.y, life: 0.45, max: 0.45, size: 340 }); // radial shockwave
     }
     this.prevZedActive = zedActive;
-    const zedA = zedActive ? 0.13 + 0.05 * Math.sin(this.state.time * 8) : 0; // subtle breathing tint
+    // Subtle breathing tint, also scaled by the flash setting (full-screen colour effect).
+    const zedA = zedActive ? scaledFlash(0.13 + 0.05 * Math.sin(this.state.time * 8), this.settings) : 0;
     this.zedOverlay.setFillStyle(0x2b6bff, zedA);
 
     // heartbeat when near death
@@ -1096,11 +1196,20 @@ export class GameScene extends Phaser.Scene {
       this.prevWavePhase = phase;
     }
 
+    // boss spawn → caption (rising edge on the live boss count)
+    const bossCount = this.state.enemies.reduce((n, e) => (e.boss ? n + 1 : n), 0);
+    if (bossCount > this.prevBossCount) {
+      const b = this.state.enemies.find((e) => e.boss);
+      this.caption(b ? `[${ZOMBIES[b.type].name.toUpperCase()} INCOMING]` : '[boss incoming]');
+    }
+    this.prevBossCount = bossCount;
+
     // doors opening → creak + minimap update
     const open = this.state.doors.filter((d) => d.open).length;
     if (open > this.prevOpenDoors) {
       this.sfx('door', 0.6);
       this.sfx('creak', 0.5, 0.9 + Math.random() * 0.3);
+      this.caption('[door opens]');
       this.minimapDirty = true;
     }
     this.prevOpenDoors = open;
@@ -1116,6 +1225,7 @@ export class GameScene extends Phaser.Scene {
       if (vol > 0.05) {
         const runner = near.type === 'runner' || near.type === 'screamer';
         this.sfx(runner ? 'snarl' : 'growl', vol, 0.85 + Math.random() * 0.3);
+        if (vol > 0.28) this.caption(near.type === 'hound' ? '[hellhound snarl]' : runner ? '[snarl]' : '[growl]');
       }
       this.growlCd = 1.3 + Math.random() * 3;
     }
@@ -1124,9 +1234,9 @@ export class GameScene extends Phaser.Scene {
     this.ambientCd -= dt;
     if (this.ambientCd <= 0 && !this.state.gameOver) {
       const pick = Math.random();
-      if (pick < 0.4) this.sfx('creak', 0.4, 0.8 + Math.random() * 0.4);
-      else if (pick < 0.72) this.sfx('knock', 0.5, 0.9 + Math.random() * 0.2);
-      else this.sfx('baby', 0.32, 0.92 + Math.random() * 0.16);
+      if (pick < 0.4) { this.sfx('creak', 0.4, 0.8 + Math.random() * 0.4); this.caption('[creak]'); }
+      else if (pick < 0.72) { this.sfx('knock', 0.5, 0.9 + Math.random() * 0.2); this.caption('[door knock]'); }
+      else { this.sfx('baby', 0.32, 0.92 + Math.random() * 0.16); this.caption('[baby crying]'); }
       this.ambientCd = 11 + Math.random() * 17;
     }
 
@@ -1188,6 +1298,8 @@ export class GameScene extends Phaser.Scene {
       }
     }
     if (hitKick > 0) this.kickCamera(46, hitKick); // one tiny kick per frame, hardest hit wins
+
+    this.updateCaptions(dt); // age + fade the accessibility caption stack
   }
 
   /** A small permanent-ish blood stain on the floor (capped pool). */
@@ -1633,8 +1745,8 @@ export class GameScene extends Phaser.Scene {
           : winding && e.type === 'stalker' && windupStrobe ? COLORS.stalkerWindup
           : winding && e.type === 'spitter' ? COLORS.spitterCharge
           : undefined,
-        // elite colour-code — hit-flash (tintFill) still wins so hits stay readable
-        tint: e.affix ? AFFIXES[e.affix].tint : undefined,
+        // elite colour-code (colour-blind-safe remap when a mode is on) — hit-flash still wins
+        tint: e.affix ? affixTint(e.affix, AFFIXES[e.affix].tint, this.settings.colorblind) : undefined,
         wobble: e.boss ? 0.05 : 0.11, // shamble sway; heavier bodies sway less
         };
       }),
@@ -1654,6 +1766,7 @@ export class GameScene extends Phaser.Scene {
       },
     );
     this.syncAffixAuras(); // pulsing elite glow rings behind affixed enemies
+    this.syncHighContrastOutlines(); // bright ring around every enemy when high-contrast is on
     this.syncDangerAuras(); // pulsing "about to blow" rings behind boomers / volatile elites
     this.syncTelegraphAudio(); // tension cue on the rising edge of a stalker / spitter wind-up
 
@@ -1886,7 +1999,8 @@ export class GameScene extends Phaser.Scene {
         const boom = this.add.image(pos.x, pos.y, 'explosion').setAlpha(0.95);
         this.setSpriteHeight(boom, 120);
         this.tweens.add({ targets: boom, alpha: 0, scale: boom.scale * 1.7, duration: 300, onComplete: () => boom.destroy() });
-        this.cameras.main.shake(120, 0.006);
+        this.shakeCam(120, 0.006);
+        this.caption('[explosion]');
         this.lightPulses.push({ x: pos.x, y: pos.y, life: 0.28, max: 0.28, size: 340 }); // blast floods the room with light
         this.explosiveBullets.delete(id);
       }
@@ -1906,7 +2020,7 @@ export class GameScene extends Phaser.Scene {
       const img = this.enemySprites.get(e.id);
       if (!img || !img.visible) continue; // no aura for enemies hidden in the dark
       seen.add(e.id);
-      const tint = AFFIXES[e.affix].tint;
+      const tint = affixTint(e.affix, AFFIXES[e.affix].tint, this.settings.colorblind); // colour-blind-safe remap
       let ring = this.affixAuras.get(e.id);
       if (!ring) {
         ring = this.add.circle(img.x, img.y, ZOMBIES[e.type].radius * 1.9, tint, 0.16).setDepth(DEPTH_BLOOD + 0.5);
@@ -1914,11 +2028,55 @@ export class GameScene extends Phaser.Scene {
       }
       const pulse = 0.9 + 0.16 * Math.sin(t * 4 + e.id); // gentle breathe
       ring.setPosition(img.x, img.y).setScale(pulse).setFillStyle(tint, 0.16);
+      // Letter tag so the affix is distinguishable WITHOUT hue (never colour-only).
+      // Only shown in a colour-blind mode — defaults keep the current clean look.
+      if (this.settings.colorblind !== 'off') {
+        let tag = this.affixTags.get(e.id);
+        if (!tag) {
+          tag = this.add
+            .text(img.x, img.y, AFFIX_TAG[e.affix], { fontFamily: 'monospace', fontSize: '11px', color: '#ffffff', fontStyle: 'bold', stroke: '#000000', strokeThickness: 3 })
+            .setOrigin(0.5)
+            .setDepth(DEPTH_BLOOD + 0.6);
+          this.affixTags.set(e.id, tag);
+        }
+        tag.setPosition(img.x, img.y - ZOMBIES[e.type].radius * 2.1);
+      }
     }
     for (const [id, ring] of this.affixAuras) {
       if (!seen.has(id)) {
         ring.destroy();
         this.affixAuras.delete(id);
+        this.affixTags.get(id)?.destroy();
+        this.affixTags.delete(id);
+      }
+    }
+  }
+
+  /**
+   * High-contrast aid: a bright thin ring around every on-screen enemy so bodies
+   * pop against the dark, low-glare floor. Pure render, pooled by enemy id, and a
+   * no-op (pool cleared) unless the high-contrast setting is on.
+   */
+  private syncHighContrastOutlines(): void {
+    const seen = new Set<number>();
+    if (this.settings.highContrast) {
+      for (const e of this.state.enemies) {
+        const img = this.enemySprites.get(e.id);
+        if (!img || !img.visible) continue;
+        seen.add(e.id);
+        const r = ZOMBIES[e.type].radius * 1.35;
+        let ring = this.hcOutlines.get(e.id);
+        if (!ring) {
+          ring = this.add.circle(img.x, img.y, r, 0xffffff, 0).setStrokeStyle(2, 0xffffff, 0.85).setDepth(DEPTH_BLOOD + 0.7);
+          this.hcOutlines.set(e.id, ring);
+        }
+        ring.setPosition(img.x, img.y).setRadius(r);
+      }
+    }
+    for (const [id, ring] of this.hcOutlines) {
+      if (!seen.has(id)) {
+        ring.destroy();
+        this.hcOutlines.delete(id);
       }
     }
   }
@@ -1981,9 +2139,10 @@ export class GameScene extends Phaser.Scene {
     const boom = this.add.image(x, y, 'explosion').setAlpha(0.95).setTint(0xff7a3a);
     this.setSpriteHeight(boom, 110);
     this.tweens.add({ targets: boom, alpha: 0, scale: boom.scale * 1.6, duration: 280, onComplete: () => boom.destroy() });
-    this.cameras.main.shake(120, 0.005);
+    this.shakeCam(120, 0.005);
     this.lightPulses.push({ x, y, life: 0.26, max: 0.26, size: 280 });
     this.sfx('explosion', 0.5);
+    this.caption('[explosion]');
   }
 
   /** Diffing renderer for circles (bullet tracers) — draws from the shared pool. */

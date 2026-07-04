@@ -2,6 +2,7 @@ import { dailySeedString } from '../sim/rng';
 import { todayYYYYMMDD } from '../game/scores';
 import { LOADOUTS, getLoadout } from '../game/loadouts';
 import { getProfile, getSelectedLoadout, isUnlocked, selectLoadout, spend, unlock } from '../game/profile';
+import { COLORBLIND_LABEL, cycleColorblind, getSettings, setSettings } from '../game/settings';
 import { createGuest, createHost, makeRoomCode, type GuestNet, type HostNet } from './net';
 
 // `seed` present ⇒ a deterministic seeded run (daily challenge / shared seed).
@@ -35,6 +36,13 @@ const CSS = `
 #lobby .lo .tag{color:#4d6b55;font-size:11px;letter-spacing:2px;white-space:nowrap}
 #lobby .lo .tag.on{color:#7dffa0}
 #lobby .lo .tag.lock{color:#c26b3b}
+#lobby .set{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:11px 12px;margin:7px 0;background:#0a1410;border:1px solid #223;border-radius:7px;text-align:left}
+#lobby .set.col{flex-direction:column;align-items:stretch;gap:9px}
+#lobby .set .sname{color:#cfe8d4;font-size:13px;letter-spacing:1px}
+#lobby .set button{width:auto;min-width:132px;margin:0;padding:8px 12px;font-size:12px}
+#lobby .set .srow{display:flex;justify-content:space-between;align-items:center;gap:10px}
+#lobby .set .sval{color:#7dffa0;font-size:12px;min-width:44px;text-align:right}
+#lobby .set input[type=range]{width:100%;margin:0;padding:0;accent-color:#3ea45a;cursor:pointer}
 `;
 
 export function showLobby(): Promise<GameConfig> {
@@ -59,6 +67,7 @@ export function showLobby(): Promise<GameConfig> {
         <button id="host">⌂ HOST GAME</button>
         <button id="join">⇲ JOIN GAME</button>
         <button class="ghost" id="loadouts">⚙ LOADOUTS · ${getLoadout(getSelectedLoadout()).name}</button>
+        <button class="ghost" id="settings">⚙ SETTINGS</button>
         <div class="sub" style="margin:14px 0 0">SEED · ${dailySeedString(todayYYYYMMDD())}</div></div>`;
       const loadout = getSelectedLoadout();
       root.querySelector('#solo')!.addEventListener('click', () => done({ role: 'solo', loadout }));
@@ -68,6 +77,57 @@ export function showLobby(): Promise<GameConfig> {
       root.querySelector('#host')!.addEventListener('click', hostFlow);
       root.querySelector('#join')!.addEventListener('click', joinFlow);
       root.querySelector('#loadouts')!.addEventListener('click', loadoutFlow);
+      root.querySelector('#settings')!.addEventListener('click', settingsFlow);
+    };
+
+    // Accessibility settings screen. Every control persists immediately to the
+    // localStorage settings module (render-layer only); GameScene reads it at run
+    // start. Sliders update their % label live without a full re-render so dragging
+    // stays smooth; toggles/cycles re-render to refresh their label.
+    const settingsFlow = () => {
+      const render = () => {
+        const s = getSettings();
+        const pct = (n: number) => `${Math.round(n * 100)}%`;
+        root.innerHTML = `<div class="box"><h1 style="font-size:24px">SETTINGS</h1>
+          <div class="sub" style="margin:-2px 0 14px">ACCESSIBILITY</div>
+          <div class="set"><span class="sname">Colour-blind mode</span>
+            <button id="cb">${COLORBLIND_LABEL[s.colorblind]}</button></div>
+          <div class="set"><span class="sname">Captions</span>
+            <button id="cap">${s.captions ? 'ON' : 'OFF'}</button></div>
+          <div class="set"><span class="sname">High contrast</span>
+            <button id="hc">${s.highContrast ? 'ON' : 'OFF'}</button></div>
+          <div class="set col"><div class="srow"><span class="sname">Screen shake</span>
+            <span class="sval" id="shakeV">${pct(s.shake)}</span></div>
+            <input type="range" id="shake" min="0" max="100" step="5" value="${Math.round(s.shake * 100)}"></div>
+          <div class="set col"><div class="srow"><span class="sname">Flash · red damage</span>
+            <span class="sval" id="flashV">${pct(s.flash)}</span></div>
+            <input type="range" id="flash" min="0" max="100" step="5" value="${Math.round(s.flash * 100)}"></div>
+          <button class="ghost" id="back" style="margin-top:14px">← back</button></div>`;
+        root.querySelector('#back')!.addEventListener('click', menu);
+        root.querySelector('#cb')!.addEventListener('click', () => {
+          cycleColorblind();
+          render();
+        });
+        root.querySelector('#cap')!.addEventListener('click', () => {
+          setSettings({ captions: !getSettings().captions });
+          render();
+        });
+        root.querySelector('#hc')!.addEventListener('click', () => {
+          setSettings({ highContrast: !getSettings().highContrast });
+          render();
+        });
+        const shake = root.querySelector('#shake') as HTMLInputElement;
+        shake.addEventListener('input', () => {
+          setSettings({ shake: Number(shake.value) / 100 });
+          root.querySelector('#shakeV')!.textContent = `${shake.value}%`;
+        });
+        const flash = root.querySelector('#flash') as HTMLInputElement;
+        flash.addEventListener('input', () => {
+          setSettings({ flash: Number(flash.value) / 100 });
+          root.querySelector('#flashV')!.textContent = `${flash.value}%`;
+        });
+      };
+      render();
     };
 
     // Meta-progression screen: spend earned currency to unlock loadouts, then SELECT
