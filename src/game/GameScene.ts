@@ -31,6 +31,7 @@ import { hashSeed, mulberry32 } from '../sim/rng';
 import { createGameState } from '../sim/state';
 import { stepSim } from '../sim/step';
 import { recordScore } from './scores';
+import { TIPS, createTipQueue, enqueueTip, loadSeenTips, markTipSeen, tickTipQueue, type TipId, type TipQueueState } from './tips';
 import { affixTint, getSettings, powerupColor, scaledFlash, scaledShake, type Settings } from './settings';
 import { BED_BASE, bedVolume, lerpTo, tensionVolume } from './music';
 import { applyLoadout } from './loadouts';
@@ -284,6 +285,12 @@ export class GameScene extends Phaser.Scene {
   private bossLabel!: Phaser.GameObjects.Text;
   private overlay?: Phaser.GameObjects.Text;
   private cashHud!: Phaser.GameObjects.Text;
+  // B9 — onboarding: contextual just-in-time tips. A pure queue (one tip at a time)
+  // + an in-memory mirror of the localStorage "seen" set so first-time detection runs
+  // each frame without touching storage. Render/localStorage-only; sim untouched.
+  private tipQueue: TipQueueState = createTipQueue();
+  private tipsSeen = new Set<string>();
+  private tipText!: Phaser.GameObjects.Text; // upper-centre toast under the wave HUD
   // guest render smoothing (entity interpolation) — targets updated per snapshot,
   // render positions eased toward them so 30 Hz snapshots look like 60 fps motion.
   private smoothEnemy = new Map<number, { x: number; y: number }>();
@@ -628,6 +635,18 @@ export class GameScene extends Phaser.Scene {
     // Captions: a bottom-centre stack of fading lines (built even when off; the
     // caption() call is gated so nothing is added unless the setting is on).
     this.captionRoot = this.add.container(0, 0).setScrollFactor(0).setDepth(DEPTH_HUD + 2);
+
+    // B9 — onboarding tip toast (upper-centre, under the boss bar / above the
+    // announcer): a small dark panel with mono amber text, hidden until a tip fires.
+    // Load the once-ever "seen" set into memory so per-frame detection never hits storage.
+    this.tipsSeen = loadSeenTips();
+    this.tipText = this.add
+      .text(480, 64, '', { fontFamily: 'monospace', fontSize: '14px', color: '#ffe08a', fontStyle: 'bold', backgroundColor: '#000c', align: 'center', wordWrap: { width: 620 } })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(DEPTH_HUD + 2)
+      .setPadding(10, 6, 10, 6)
+      .setVisible(false);
 
     this.buildShopUI();
     this.buildDraftUI();
@@ -1250,7 +1269,61 @@ export class GameScene extends Phaser.Scene {
       this.sfx(GUN_SOUND[now.weapon] ?? 'shot', now.weapon === 'shotgun' || now.weapon === 'rpg' ? 0.55 : 0.42);
     }
     this.gameFeelEvents(dt);
+    this.updateTips(dt);
     this.renderState(this.role === 'guest' ? 1 : alpha, dt);
+  }
+
+  /**
+   * B9 — queue a contextual tip the FIRST time its situation is relevant, then never
+   * again (persisted once-ever). Reads existing sim state only — no sim/netcode touch.
+   * The in-memory `tipsSeen` mirror gates re-fires without a per-frame localStorage read;
+   * markTipSeen persists so the flag survives runs/sessions.
+   */
+  private maybeTip(id: TipId): void {
+    if (this.tipsSeen.has(id)) return;
+    this.tipsSeen.add(id);
+    markTipSeen(id);
+    enqueueTip(this.tipQueue, id, TIPS[id]);
+  }
+
+  /** B9 — detect first-time onboarding situations, drive the tip queue, render the toast. */
+  private updateTips(dt: number): void {
+    const s = this.state;
+    if (!s.gameOver) {
+      const lp = this.local();
+      // near a pay-door (only when up — a downed player can't buy)
+      if (isUp(lp) && this.nearestPayDoor(lp)) this.maybeTip('paydoor');
+      // any power-up on the ground
+      if (s.powerups.length > 0) this.maybeTip('powerup');
+      // near a buyable → the tip for that specific kind
+      const near = isUp(lp) ? nearestBuyable(s, lp) : null;
+      if (near) {
+        if (near.kind === 'mysterybox') this.maybeTip('mysterybox');
+        else if (near.kind === 'packapunch') this.maybeTip('packapunch');
+        else if (near.kind === 'wallbuy') this.maybeTip('wallbuy');
+        else if (near.kind === 'power') this.maybeTip('power');
+      }
+      // perk draft is open
+      if (s.perkDraft) this.maybeTip('perkdraft');
+      // local player just went down
+      if (lp.downed) this.maybeTip('downed');
+      // a boss is on the field
+      if (s.enemies.some((e) => e.boss)) this.maybeTip('boss');
+      // a hellhound special round
+      if (s.dogRound) this.maybeTip('doground');
+      // the shared Zed-Time meter is full and ready
+      if (s.zedCharge >= 1) this.maybeTip('zedtime');
+    }
+    // advance the queue (age the current tip, promote the next) and render it
+    tickTipQueue(this.tipQueue, dt);
+    const cur = this.tipQueue.current;
+    if (cur) {
+      // fade out over the last 0.6 s so dismissal reads as intentional, not a pop
+      const fade = Math.min(1, cur.life / 0.6);
+      this.tipText.setText(cur.text).setVisible(true).setAlpha(fade);
+    } else {
+      this.tipText.setVisible(false);
+    }
   }
 
   /**

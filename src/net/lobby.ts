@@ -3,6 +3,7 @@ import { todayYYYYMMDD } from '../game/scores';
 import { LOADOUTS, getLoadout } from '../game/loadouts';
 import { getProfile, getSelectedLoadout, isUnlocked, selectLoadout, spend, unlock } from '../game/profile';
 import { COLORBLIND_LABEL, cycleColorblind, getSettings, setSettings } from '../game/settings';
+import { resetTips } from '../game/tips';
 import { createGuest, createHost, makeRoomCode, type GuestNet, type HostNet } from './net';
 
 // `seed` present ⇒ a deterministic seeded run (daily challenge / shared seed).
@@ -43,6 +44,11 @@ const CSS = `
 #lobby .set .srow{display:flex;justify-content:space-between;align-items:center;gap:10px}
 #lobby .set .sval{color:#7dffa0;font-size:12px;min-width:44px;text-align:right}
 #lobby .set input[type=range]{width:100%;margin:0;padding:0;accent-color:#3ea45a;cursor:pointer}
+#lobby .ctl{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:5px 4px;border-bottom:1px solid #16211a;text-align:left}
+#lobby .ctl .key{color:#7dffa0;font-size:12px;letter-spacing:1px;flex:0 0 auto;font-weight:bold}
+#lobby .ctl .cd{color:#8aa892;font-size:12px;text-align:right}
+#lobby .howtxt{color:#8aa892;font-size:12px;line-height:1.6;text-align:left;margin:14px 2px 4px}
+#lobby .howtxt b{color:#cfe8d4;font-weight:bold}
 `;
 
 export function showLobby(): Promise<GameConfig> {
@@ -68,6 +74,7 @@ export function showLobby(): Promise<GameConfig> {
         <button id="join">⇲ JOIN GAME</button>
         <button class="ghost" id="loadouts">⚙ LOADOUTS · ${getLoadout(getSelectedLoadout()).name}</button>
         <button class="ghost" id="settings">⚙ SETTINGS</button>
+        <button class="ghost" id="howto">⚑ HOW TO PLAY</button>
         <div class="sub" style="margin:14px 0 0">SEED · ${dailySeedString(todayYYYYMMDD())}</div></div>`;
       const loadout = getSelectedLoadout();
       root.querySelector('#solo')!.addEventListener('click', () => done({ role: 'solo', loadout }));
@@ -78,6 +85,44 @@ export function showLobby(): Promise<GameConfig> {
       root.querySelector('#join')!.addEventListener('click', joinFlow);
       root.querySelector('#loadouts')!.addEventListener('click', loadoutFlow);
       root.querySelector('#settings')!.addEventListener('click', settingsFlow);
+      root.querySelector('#howto')!.addEventListener('click', howToFlow);
+    };
+
+    // HOW TO PLAY — a controls reference + a one-paragraph "how it works", plus a
+    // button to re-arm the contextual onboarding tips. Pure render/DOM (mirrors the
+    // SETTINGS / LOADOUTS sub-screen pattern); nothing here touches the sim.
+    const howToFlow = () => {
+      const controls: [string, string][] = [
+        ['WASD', 'move'],
+        ['Mouse', 'aim · click to fire'],
+        ['Shift', 'sprint'],
+        ['Space', 'dash (dodge)'],
+        ['1–9 / Q · E / wheel', 'switch weapons'],
+        ['F', 'interact · buy (doors / box / Pack-a-Punch / walls / power)'],
+        ['B', 'build (barricade / trap)'],
+        ['Z', 'ping (mark enemy / loot / go)'],
+        ['X', 'Zed-Time (slow enemies when the meter is full)'],
+        ['R', 'restart after death'],
+      ];
+      const rows = controls
+        .map(([k, v]) => `<div class="ctl"><span class="key">${k}</span><span class="cd">${v}</span></div>`)
+        .join('');
+      root.innerHTML = `<div class="box"><h1 style="font-size:24px">HOW TO PLAY</h1>
+        <div class="sub" style="margin:-2px 0 12px">CONTROLS</div>
+        ${rows}
+        <div class="howtxt">Survive endless waves of the dead. Every hit and kill earns
+        shared <b>cash</b> — spend it to open <b>doors</b>, buy guns off the <b>wall</b>
+        or the <b>Mystery Box</b>, flip the <b>power</b>, and <b>Pack-a-Punch</b> your
+        weapon. Between waves, <b>draft a perk</b> (rarer = more levels). Stay together:
+        reviving a downed teammate beats going down alone.</div>
+        <div class="msg" id="msg" style="min-height:0"></div>
+        <button class="ghost" id="rt">↺ RESET TIPS</button>
+        <button class="ghost" id="back" style="margin-top:6px">← back</button></div>`;
+      root.querySelector('#back')!.addEventListener('click', menu);
+      root.querySelector('#rt')!.addEventListener('click', () => {
+        resetTips();
+        root.querySelector('#msg')!.textContent = 'onboarding tips will show again';
+      });
     };
 
     // Accessibility settings screen. Every control persists immediately to the
