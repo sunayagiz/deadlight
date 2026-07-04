@@ -13,6 +13,8 @@ export interface WeaponDef {
   bulletTtl?: number; // seconds
   pellets?: number; // projectiles per trigger pull (shotgun)
   spread?: number; // radians of random spread
+  recoil?: number; // RENDER-ONLY feel multiplier (1 = pistol baseline): scales the
+  //                 weapon-sprite kick + camera shake. Pure data, no sim effect.
   spinUpTime?: number; // minigun: seconds of held fire to reach full rate
   splashRadius?: number; // rpg
   splashDamage?: number;
@@ -29,17 +31,17 @@ export interface WeaponDef {
  * other knob is data. New weapon = new row, not a new class.
  */
 export const WEAPONS: Record<WeaponId, WeaponDef> = {
-  pistol: { id: 'pistol', name: 'Pistol', kind: 'gun', damage: 25, fireRate: 4, bulletSpeed: 900, bulletTtl: 0.8, pellets: 1, spread: 0 },
-  smg: { id: 'smg', name: 'SMG', kind: 'gun', damage: 12, fireRate: 12, bulletSpeed: 950, bulletTtl: 0.7, spread: 0.05 },
-  shotgun: { id: 'shotgun', name: 'Shotgun', kind: 'gun', damage: 14, fireRate: 1.3, bulletSpeed: 850, bulletTtl: 0.35, pellets: 8, spread: 0.35 },
-  machinegun: { id: 'machinegun', name: 'Machine Gun', kind: 'gun', damage: 20, fireRate: 9, bulletSpeed: 1000, bulletTtl: 0.9, spread: 0.06 },
-  minigun: { id: 'minigun', name: 'Minigun', kind: 'gun', damage: 18, fireRate: 20, bulletSpeed: 1050, bulletTtl: 0.9, spread: 0.1, spinUpTime: 1, startAmmo: 400 },
-  rpg: { id: 'rpg', name: 'RPG', kind: 'rpg', damage: 80, fireRate: 0.7, bulletSpeed: 620, bulletTtl: 2.5, splashRadius: 110, splashDamage: 120, startAmmo: 8 },
+  pistol: { id: 'pistol', name: 'Pistol', kind: 'gun', damage: 25, fireRate: 4, bulletSpeed: 900, bulletTtl: 0.8, pellets: 1, spread: 0, recoil: 1 },
+  smg: { id: 'smg', name: 'SMG', kind: 'gun', damage: 12, fireRate: 12, bulletSpeed: 950, bulletTtl: 0.7, spread: 0.05, recoil: 0.55 },
+  shotgun: { id: 'shotgun', name: 'Shotgun', kind: 'gun', damage: 14, fireRate: 1.3, bulletSpeed: 850, bulletTtl: 0.35, pellets: 8, spread: 0.35, recoil: 2.8 },
+  machinegun: { id: 'machinegun', name: 'Machine Gun', kind: 'gun', damage: 20, fireRate: 9, bulletSpeed: 1000, bulletTtl: 0.9, spread: 0.06, recoil: 1.2 },
+  minigun: { id: 'minigun', name: 'Minigun', kind: 'gun', damage: 18, fireRate: 20, bulletSpeed: 1050, bulletTtl: 0.9, spread: 0.1, spinUpTime: 1, startAmmo: 400, recoil: 1.7 },
+  rpg: { id: 'rpg', name: 'RPG', kind: 'rpg', damage: 80, fireRate: 0.7, bulletSpeed: 620, bulletTtl: 2.5, splashRadius: 110, splashDamage: 120, startAmmo: 8, recoil: 3.4 },
   katana: { id: 'katana', name: 'Katana', kind: 'melee', damage: 70, fireRate: 2.2, range: 64, arc: 0.9 },
   bat: { id: 'bat', name: 'Baseball Bat', kind: 'melee', damage: 50, fireRate: 2.6, range: 58, arc: 1.0 },
   chainsaw: { id: 'chainsaw', name: 'Chainsaw', kind: 'melee', damage: 60, fireRate: 1, range: 52, arc: 0.6, hold: true, startAmmo: 300 },
   // Wonder weapon — energy pistol with a nasty splash; Mystery Box only.
-  raygun: { id: 'raygun', name: 'Ray Gun', kind: 'gun', damage: 110, fireRate: 4, bulletSpeed: 820, bulletTtl: 1.2, pellets: 1, spread: 0.02, splashRadius: 55, splashDamage: 70, startAmmo: 160 },
+  raygun: { id: 'raygun', name: 'Ray Gun', kind: 'gun', damage: 110, fireRate: 4, bulletSpeed: 820, bulletTtl: 1.2, pellets: 1, spread: 0.02, splashRadius: 55, splashDamage: 70, startAmmo: 160, recoil: 2 },
 };
 
 export function updateAim(p: PlayerState, input: PlayerInput): void {

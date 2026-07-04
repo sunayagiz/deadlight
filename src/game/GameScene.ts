@@ -454,6 +454,26 @@ export class GameScene extends Phaser.Scene {
     return px >= r.x0 && px <= r.x1 && py >= r.y0 && py <= r.y1;
   }
 
+  /**
+   * Render-only "power" factor from a weapon's base damage (~0.7 for the SMG up to
+   * a 2.0 cap for the RPG/Ray Gun). Modulates muzzle-flash size, camera shake, and
+   * blood/gib intensity so heavier guns simply LOOK heavier — never touches the sim.
+   */
+  private static dmgFeel(damage: number): number {
+    return Math.min(2, 0.7 + damage / 60);
+  }
+
+  /**
+   * Camera shake that never *weakens* a bigger one already playing. Fire recoil and
+   * per-hit impact both kick the camera; without this a tiny hit-kick fired the same
+   * frame as a shotgun blast would stomp the big shake down to nothing.
+   */
+  private kickCamera(duration: number, intensity: number): void {
+    const eff = this.cameras.main.shakeEffect;
+    if (eff.isRunning && eff.intensity.x >= intensity) return;
+    this.cameras.main.shake(duration, intensity);
+  }
+
   /** Route a click to a shop row or a perk card (screen-space). */
   private handleUiClick(px: number, py: number): void {
     if (this.state.gameOver) return;
@@ -733,14 +753,19 @@ export class GameScene extends Phaser.Scene {
     // muzzle/recoil/sound off the LOCAL player firing (cooldown jumped up this frame)
     const now = this.local();
     if (now.fireCooldown > this.prevLocalFireCd + 0.001 && WEAPONS[now.weapon].kind !== 'melee') {
-      this.cameras.main.shake(40, 0.0008);
+      const wdef = WEAPONS[now.weapon];
+      const kick = wdef.recoil ?? 1; // per-weapon heft (data-driven): shotgun/RPG punch, SMG barely nudges
+      const dmgFeel = GameScene.dmgFeel(wdef.damage); // damage-scaled magnitudes (flash/shake/light)
+      // camera kick + weapon-sprite pushback both ride the per-weapon recoil (kickCamera
+      // won't let a light shot weaken a heavier shake already running).
+      this.kickCamera(38 + kick * 14, Math.min(0.004, 0.0007 * kick * dmgFeel));
       const fx = now.pos.x + Math.cos(now.aimAngle) * 30;
       const fy = now.pos.y + Math.sin(now.aimAngle) * 30;
       const flash = this.add.image(fx, fy, 'muzzle').setRotation(now.aimAngle).setAlpha(0.95);
-      this.setSpriteHeight(flash, 34);
+      this.setSpriteHeight(flash, 20 + 14 * dmgFeel); // bigger guns flash bigger
       this.time.delayedCall(45, () => flash.destroy());
-      this.recoil = 5;
-      this.lightPulses.push({ x: fx, y: fy, life: 0.09, max: 0.09, size: 130 });
+      this.recoil = 5 * kick; // sprite shoved back along aim, decays fast in renderState
+      this.lightPulses.push({ x: fx, y: fy, life: 0.09, max: 0.09, size: 110 + 60 * dmgFeel });
       this.sfx(GUN_SOUND[now.weapon] ?? 'shot', now.weapon === 'shotgun' || now.weapon === 'rpg' ? 0.55 : 0.42);
     }
     this.gameFeelEvents(dt);
@@ -824,10 +849,24 @@ export class GameScene extends Phaser.Scene {
     if (p.dash.timeLeft > this.prevDashLeft + 0.05) this.sfx('whoosh', 0.3, 1.4);
     this.prevDashLeft = p.dash.timeLeft;
 
-    // fresh hits → armored bodies SPARK (bullets ping off), everything else bleeds
+    // fresh hits → armored bodies SPARK (bullets ping off), everything else bleeds.
+    // Spray/impact heft ride the LOCAL weapon's damage so a big gun reads as a big hit.
+    const dmgFeel = GameScene.dmgFeel(WEAPONS[p.weapon].damage);
     let squelched = false;
+    let hitKick = 0; // strongest per-hit camera kick this frame (max, not sum → no pile-up)
     for (const e of this.state.enemies) {
       if (e.hitFlash > 0.065) {
+        // Impact punch (hit-stop, RENDER-ONLY): a brief squash-and-stretch on the struck
+        // body + a tiny camera kick. The sim tick is never paused/scaled, so co-op stays
+        // deterministic — this only tweens the Phaser sprite's scale.
+        const img = this.enemySprites.get(e.id);
+        if (img && img.visible) {
+          const base = (ZOMBIES[e.type].radius * 4.7) / img.texture.getSourceImage().height;
+          this.tweens.killTweensOf(img); // restart cleanly on rapid re-hits (no scale drift)
+          img.setScale(base);
+          this.tweens.add({ targets: img, scale: base * 1.18, duration: 34, yoyo: true, ease: 'Quad.easeOut' });
+        }
+        hitKick = Math.max(hitKick, Math.min(0.0022, 0.0011 * dmgFeel));
         const dir = Math.atan2(e.vel.y, e.vel.x) + Math.PI; // roughly away from the shot
         if (e.type === 'armored') {
           // metallic sparks — a clear "guns barely work, melee it" cue
@@ -843,9 +882,10 @@ export class GameScene extends Phaser.Scene {
           this.sfx('squelch', 0.5, 0.9 + Math.random() * 0.3);
           squelched = true;
         }
-        for (let i = 0; i < 6; i++) {
+        const drops = Math.min(11, Math.round(6 * dmgFeel)); // bigger guns → bigger spray (capped for perf)
+        for (let i = 0; i < drops; i++) {
           const a = dir + (Math.random() - 0.5) * 2.4;
-          const dist = 20 + Math.random() * 44;
+          const dist = (20 + Math.random() * 44) * (0.85 + 0.35 * dmgFeel);
           const drop = this.getCircle(e.pos.x, e.pos.y, 1.6 + Math.random() * 2.4, 0x8a1414, 0.92, 1);
           this.tweens.add({
             targets: drop,
@@ -860,6 +900,7 @@ export class GameScene extends Phaser.Scene {
         if (Math.random() < 0.5) this.stainFloor(e.pos.x + (Math.random() - 0.5) * 30, e.pos.y + (Math.random() - 0.5) * 30, 3);
       }
     }
+    if (hitKick > 0) this.kickCamera(46, hitKick); // one tiny kick per frame, hardest hit wins
   }
 
   /** A small permanent-ish blood stain on the floor (capped pool). */
@@ -869,15 +910,17 @@ export class GameScene extends Phaser.Scene {
     if (this.bloodDecals.length > 160) this.bloodDecals.shift()!.destroy();
   }
 
-  /** Death gore: a pool + flying flesh/bone gibs. */
-  private spawnGore(x: number, y: number): void {
+  /** Death gore: a pool + flying flesh/bone gibs. `intensity` (render-only, ~0.7–2) scales
+   *  the pool size + gib count/spread so a kill with a heavier gun sprays harder. */
+  private spawnGore(x: number, y: number, intensity = 1): void {
     const pool = this.add.image(x, y, 'blood').setDepth(DEPTH_BLOOD).setAlpha(0.85).setRotation(Math.random() * 6.28);
-    this.setSpriteHeight(pool, 40 + Math.random() * 24);
+    this.setSpriteHeight(pool, (40 + Math.random() * 24) * (0.9 + 0.2 * intensity));
     this.bloodDecals.push(pool);
     if (this.bloodDecals.length > 160) this.bloodDecals.shift()!.destroy();
-    for (let i = 0; i < 9; i++) {
+    const gibs = Math.min(14, Math.round(9 * intensity)); // capped so the RPG doesn't flood the pool
+    for (let i = 0; i < gibs; i++) {
       const a = Math.random() * 6.28;
-      const dist = 24 + Math.random() * 60;
+      const dist = (24 + Math.random() * 60) * (0.85 + 0.35 * intensity);
       const bone = Math.random() < 0.3;
       const gib = this.add
         .circle(x, y, 1.8 + Math.random() * 3, bone ? 0xcfc7a8 : 0x6e1012, 0.95)
@@ -975,6 +1018,7 @@ export class GameScene extends Phaser.Scene {
   private renderState(alpha: number, dt: number): void {
     const players = this.state.players;
     const lp = this.local();
+    const killFeel = GameScene.dmgFeel(WEAPONS[lp.weapon].damage); // render-only gore intensity from the local weapon
     // guests render their own player from the local prediction (no round-trip lag)
     const renderLocal = this.role === 'guest' && this.predicted ? this.predicted : lp;
     this.recoil = Math.max(0, this.recoil - dt * 60);
@@ -1166,8 +1210,9 @@ export class GameScene extends Phaser.Scene {
         };
       }),
       (lastX, lastY, id, img) => {
+        this.tweens.killTweensOf(img); // stop any in-flight impact-punch before the sprite dies
         if (img.texture.key === 'boomer' || this.volatileIds.has(id)) this.boomerExplode(lastX, lastY); // detonates on death
-        this.spawnGore(lastX, lastY); // pool + flying flesh/bone gibs
+        this.spawnGore(lastX, lastY, killFeel); // pool + flying flesh/bone gibs, sprayed by weapon heft
         // corpse: the sprite stays behind, blood-darkened, and slowly soaks away
         const corpse = this.add
           .image(lastX, lastY, img.texture.key)
