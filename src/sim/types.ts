@@ -24,6 +24,19 @@ export interface PlayerInput {
   place: { x: number; y: number; kind: DeployableKind } | null; // A7: request to build a deployable at a world point; null = none
 }
 
+/**
+ * B6 — draft rarity tier (RoR2 / Killing-Floor style). Each draft option rolls a
+ * rarity via the threaded rng; the rarity decides HOW MANY perk levels the pick
+ * grants (see LEVELS_FOR in config). Weighted heavily toward `common`.
+ */
+export type Rarity = 'common' | 'rare' | 'legendary';
+
+/** A single perk-draft option: a perk id plus the rarity it rolled this draft. */
+export interface DraftOption {
+  id: string; // PerkId
+  rarity: Rarity;
+}
+
 /** A7 — buildable defence the squad spends points to place (host-authoritative). */
 export type DeployableKind = 'barricade' | 'trap';
 
@@ -278,7 +291,7 @@ export interface GameState {
   totalKills: number; // running kill tally across all waves (drives the run score)
   cash: number; // shared squad currency, spent in the between-wave shop
   perks: Record<string, number>; // shared squad perk levels (perk id → stacks)
-  perkDraft: string[] | null; // 3 perk ids offered right now, or null when no draft is pending
+  perkDraft: DraftOption[] | null; // PERK_CHOICES options (id + rolled rarity) offered right now, or null when no draft is pending
   rerollCount: number; // rerolls spent on the CURRENT draft (drives the rising reroll cost); resets per draft
   banished: string[]; // perk ids banished for the rest of the run; rollDraft excludes these forever
   extractPoint: { x: number; y: number }; // static exit location (from the map; off-wire)

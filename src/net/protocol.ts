@@ -1,6 +1,7 @@
 import type {
   BulletState,
   Deployable,
+  DraftOption,
   EnemyState,
   ExtractionState,
   GameState,
@@ -36,7 +37,7 @@ export interface Snapshot {
   tk: number; // totalKills (co-op score display)
   cash: number;
   perks: Record<string, number>;
-  draft: string[] | null; // perkDraft
+  draft: DraftOption[] | null; // perkDraft (each option carries id + rolled rarity)
   rr: number; // rerollCount (drives the reroll cost on guests)
   ban: string[]; // banished perk ids
   extract: ExtractionState | null;

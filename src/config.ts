@@ -209,3 +209,23 @@ export const PERK_CHOICES = 3; // options shown per draft
 export const REROLL_BASE = 150; // cash for the first reroll of a draft
 export const REROLL_STEP = 150; // added per reroll already spent this draft (150 → 300 → 450 …)
 export const BANISH_COST = 250; // cash to permanently remove a perk from the run's pool
+// B6 — Perk depth: rarity tiers on the draft (RoR2 / Killing-Floor style). Every
+// draft option rolls a rarity via the threaded rng, weighted HEAVILY toward
+// common; the rarity decides how many levels the pick grants. Weights are
+// integer "points" summed into a total the rng picks against (deterministic).
+export const RARITY_WEIGHTS: Record<import('./sim/types').Rarity, number> = {
+  common: 70, // ~70% of options
+  rare: 24, //  ~24%
+  legendary: 6, //  ~6%
+};
+// The weights drift slightly toward the shinier tiers as the run wears on, so a
+// late-game trivial wave still dangles the occasional legendary. `shift` points
+// are lifted from common each wave (capped) and split 70/30 into rare/legendary.
+export const RARITY_SHIFT_PER_WAVE = 0.8; // weight points moved off common per wave cleared
+export const RARITY_SHIFT_MAX = 30; // cap on the total shift (keeps common the default)
+// How many perk levels each rarity grants when chosen (clamped at PERK_MAX_LEVEL).
+export const LEVELS_FOR: Record<import('./sim/types').Rarity, number> = {
+  common: 1,
+  rare: 2,
+  legendary: 3,
+};

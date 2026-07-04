@@ -12,6 +12,7 @@ import {
   FLASHLIGHT_HALF_ANGLE,
   FLASHLIGHT_RANGE,
   INTERACT_RADIUS,
+  LEVELS_FOR,
   PLAYER_MAX_HP,
   PLAYER_RADIUS,
   SIM_DT,
@@ -429,7 +430,12 @@ export class GameScene extends Phaser.Scene {
     }
     const debugCash = Number(qs.get('cash'));
     if (debugCash > 0) this.state.cash = debugCash;
-    if (qs.has('perk')) this.state.perkDraft = ['damage', 'firerate', 'vigor'];
+    if (qs.has('perk'))
+      this.state.perkDraft = [
+        { id: 'damage', rarity: 'common' },
+        { id: 'firerate', rarity: 'rare' },
+        { id: 'vigor', rarity: 'legendary' },
+      ];
     // ?cod: drop the player at the Mystery Box with cash, some power-ups, and a hound
     if (qs.has('cod')) {
       this.state.cash = 9999;
@@ -2011,13 +2017,28 @@ export class GameScene extends Phaser.Scene {
     if (!open || !draft) return;
     const ptr = this.input.activePointer;
     const canBanish = this.state.cash >= BANISH_COST;
+    // B6 rarity tint: common grey/green, rare blue, legendary gold (border + title + label)
+    const RARITY = {
+      common: { hex: 0x3ea45a, css: '#8fef9f' },
+      rare: { hex: 0x4a8fe0, css: '#8fc4ff' },
+      legendary: { hex: 0xffd45e, css: '#ffe08a' },
+    } as const;
     this.draftCards.forEach((card, i) => {
-      const id = draft[i] as PerkId | undefined;
-      const shown = !!id;
+      const opt = draft[i];
+      const id = opt?.id as PerkId | undefined;
+      const shown = !!(id && opt);
       card.bg.setVisible(shown);
+      if (id && opt) {
+        const rc = RARITY[opt.rarity];
+        card.bg.setStrokeStyle(2, rc.hex);
+        card.title.setColor(rc.css);
+      }
       card.title.setVisible(shown).setText(id ? PERKS[id].name : '');
       const lvl = id ? this.state.perks[id] ?? 0 : 0;
-      card.body.setVisible(shown).setText(id ? `${PERKS[id].desc}\n\n${lvl > 0 ? `owned ×${lvl}` : 'new'}` : '');
+      const n = opt ? LEVELS_FOR[opt.rarity] : 0;
+      card.body
+        .setVisible(shown)
+        .setText(id && opt ? `${PERKS[id].desc}\n\n${opt.rarity.toUpperCase()}  +${n} lvl${lvl > 0 ? `  ·  owned ×${lvl}` : ''}` : '');
       // banish ✕: bright when affordable + hovered, dim otherwise
       const bHover = canBanish && !!this.banishHit[i] && GameScene.hit(ptr.x, ptr.y, this.banishHit[i]);
       card.banish.setVisible(shown).setColor(!canBanish ? '#4a3d3b' : bHover ? '#ff7a6e' : '#c0554d');

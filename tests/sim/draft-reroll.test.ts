@@ -4,12 +4,17 @@ import { SIM_DT } from '../../src/config';
 import { banishPerk, rerollCost, rerollDraft, rollDraft } from '../../src/sim/perks';
 import { createGameState, emptyInput } from '../../src/sim/state';
 import { stepSim } from '../../src/sim/step';
-import type { GameState } from '../../src/sim/types';
+import type { DraftOption, GameState } from '../../src/sim/types';
 
 /** Minimal state for pure perk-draft logic. */
 function fresh(): GameState {
   return createGameState([{ x: 0, y: 0, w: 10, h: 10 }], [], [], { x: 100, y: 100 }, { width: 800, height: 600 }, 1);
 }
+
+/** Build a fixed draft (B6 {id,rarity} shape) — rarity irrelevant to reroll/banish plumbing. */
+const draftOf = (...ids: string[]): DraftOption[] => ids.map((id) => ({ id, rarity: 'common' as const }));
+/** The perk ids currently offered (order-preserving). */
+const ids = (d: DraftOption[] | null): string[] => (d ?? []).map((o) => o.id);
 
 /** Deterministic rng cycling through a fixed value sequence. */
 function seq(values: number[]): () => number {
@@ -29,7 +34,7 @@ describe('draft reroll', () => {
     expect(s.cash).toBe(1000 - REROLL_BASE);
     expect(s.rerollCount).toBe(1);
     expect(s.perkDraft!.length).toBe(PERK_CHOICES);
-    expect(new Set(s.perkDraft!).size).toBe(s.perkDraft!.length); // distinct
+    expect(new Set(ids(s.perkDraft)).size).toBe(s.perkDraft!.length); // distinct ids
 
     // same seed + same state → same roll (determinism for co-op/tests)
     const t = fresh();
@@ -77,38 +82,38 @@ describe('draft banish', () => {
   it('removes a perk from the pool so rollDraft never offers it again', () => {
     const s = fresh();
     s.cash = 1000;
-    s.perkDraft = ['damage', 'firerate', 'speed'];
+    s.perkDraft = draftOf('damage', 'firerate', 'speed');
     const ok = banishPerk(s, 0, () => 0); // banish 'damage'
     expect(ok).toBe(true);
     expect(s.cash).toBe(1000 - BANISH_COST);
     expect(s.banished).toContain('damage');
     // draft still shows a full set, and the banished perk is gone from it
     expect(s.perkDraft!.length).toBe(PERK_CHOICES);
-    expect(s.perkDraft).not.toContain('damage');
+    expect(ids(s.perkDraft)).not.toContain('damage');
 
     // exhaustively roll many drafts — 'damage' must never resurface
     for (let i = 0; i < 200; i++) {
       const draft = rollDraft(s, seq([0.05, 0.37, 0.61, 0.83, 0.19, 0.5]));
-      expect(draft).not.toContain('damage');
+      expect(ids(draft)).not.toContain('damage');
     }
   });
 
   it('refills the banished slot with a fresh, non-duplicate option', () => {
     const s = fresh();
     s.cash = 1000;
-    s.perkDraft = ['damage', 'firerate', 'speed'];
+    s.perkDraft = draftOf('damage', 'firerate', 'speed');
     banishPerk(s, 1, seq([0.5])); // banish 'firerate', refill slot 1
     expect(s.perkDraft!.length).toBe(PERK_CHOICES);
-    expect(new Set(s.perkDraft!).size).toBe(s.perkDraft!.length); // still distinct
-    expect(s.perkDraft![0]).toBe('damage'); // untouched slots preserved
-    expect(s.perkDraft![2]).toBe('speed');
-    expect(s.perkDraft).not.toContain('firerate');
+    expect(new Set(ids(s.perkDraft)).size).toBe(s.perkDraft!.length); // still distinct
+    expect(s.perkDraft![0].id).toBe('damage'); // untouched slots preserved
+    expect(s.perkDraft![2].id).toBe('speed');
+    expect(ids(s.perkDraft)).not.toContain('firerate');
   });
 
   it('is a no-op when broke or when no draft is pending', () => {
     const s = fresh();
     s.cash = BANISH_COST - 1;
-    s.perkDraft = ['damage', 'firerate', 'speed'];
+    s.perkDraft = draftOf('damage', 'firerate', 'speed');
     expect(banishPerk(s, 0, () => 0)).toBe(false);
     expect(s.banished).toEqual([]);
     s.perkDraft = null;
@@ -121,7 +126,7 @@ describe('draft agency flows through PlayerInput (host-authoritative)', () => {
   it('reroll and banish inputs are honored during intermission', () => {
     const s = fresh(); // starts in intermission (wave.phase === 'intermission')
     s.cash = 1000;
-    s.perkDraft = ['damage', 'firerate', 'speed'];
+    s.perkDraft = draftOf('damage', 'firerate', 'speed');
 
     // reroll via input
     const rr = emptyInput();
@@ -132,7 +137,7 @@ describe('draft agency flows through PlayerInput (host-authoritative)', () => {
 
     // banish option 0 via input
     const cashAfterReroll = s.cash;
-    const banished = s.perkDraft![0];
+    const banished = s.perkDraft![0].id;
     const bn = emptyInput();
     bn.banish = 0;
     stepSim(s, [bn], SIM_DT, seq([0.4]));

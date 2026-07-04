@@ -58,8 +58,12 @@ describe('perks', () => {
     const s = fresh();
     const draft = rollDraft(s, () => 0); // deterministic
     expect(draft.length).toBeGreaterThan(0);
-    expect(new Set(draft).size).toBe(draft.length); // distinct
-    s.perkDraft = ['damage', 'speed', 'vigor'];
+    expect(new Set(draft.map((o) => o.id)).size).toBe(draft.length); // distinct ids
+    s.perkDraft = [
+      { id: 'damage', rarity: 'common' },
+      { id: 'speed', rarity: 'common' },
+      { id: 'vigor', rarity: 'common' },
+    ];
     expect(damageMult(s)).toBe(1);
     choosePerk(s, 0); // pick damage
     expect(s.perks.damage).toBe(1);
@@ -70,7 +74,11 @@ describe('perks', () => {
   it('vigor raises max hp and heals immediately', () => {
     const s = fresh();
     s.players[0].hp = PLAYER_MAX_HP;
-    s.perkDraft = ['vigor', 'speed', 'regen'];
+    s.perkDraft = [
+      { id: 'vigor', rarity: 'common' },
+      { id: 'speed', rarity: 'common' },
+      { id: 'regen', rarity: 'common' },
+    ];
     choosePerk(s, 0);
     expect(effectiveMaxHp(s)).toBe(PLAYER_MAX_HP + 25);
     expect(s.players[0].hp).toBe(PLAYER_MAX_HP + 25);

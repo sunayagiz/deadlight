@@ -27,7 +27,11 @@ describe('snapshot round-trip', () => {
     const host = hostState();
     host.cash = 275;
     host.perks = { damage: 2, greed: 1 };
-    host.perkDraft = ['speed', 'vigor', 'regen'];
+    host.perkDraft = [
+      { id: 'speed', rarity: 'common' },
+      { id: 'vigor', rarity: 'rare' },
+      { id: 'regen', rarity: 'legendary' },
+    ];
     host.rerollCount = 2;
     host.banished = ['thorns', 'lifesteal'];
     host.won = false;
@@ -38,7 +42,11 @@ describe('snapshot round-trip', () => {
 
     expect(guest.cash).toBe(275);
     expect(guest.perks).toEqual({ damage: 2, greed: 1 });
-    expect(guest.perkDraft).toEqual(['speed', 'vigor', 'regen']);
+    expect(guest.perkDraft).toEqual([
+      { id: 'speed', rarity: 'common' },
+      { id: 'vigor', rarity: 'rare' },
+      { id: 'regen', rarity: 'legendary' },
+    ]);
     expect(guest.rerollCount).toBe(2);
     expect(guest.banished).toEqual(['thorns', 'lifesteal']);
     expect(guest.won).toBe(false);
