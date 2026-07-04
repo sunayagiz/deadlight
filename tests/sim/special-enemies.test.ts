@@ -12,13 +12,17 @@ function fresh(): GameState {
 }
 
 describe('spitter (ranged)', () => {
-  it('lobs an acid bullet at a player in range with clear LOS', () => {
+  it('charges (wind-up) before it fires — no bullet during the charge, one after', () => {
     const s = fresh();
     const sp = spawnEnemy(s, 'spitter', { x: 800, y: 500 }); // 300px away, LOS clear
     sp.cd = 0;
     expect(s.bullets.length).toBe(0);
-    updateRangedEnemies(s, SIM_DT);
-    expect(s.bullets.length).toBe(1);
+    updateRangedEnemies(s, SIM_DT); // tick 1: begins the telegraphed charge
+    expect(sp.windup).toBeGreaterThan(0); // visibly charging now
+    expect(s.bullets.length).toBe(0); // …but nothing has launched yet — dodge it
+    let guard = 0;
+    while ((sp.windup ?? 0) > 0 && guard++ < 200) updateRangedEnemies(s, SIM_DT); // run out the charge
+    expect(s.bullets.length).toBe(1); // charge complete → acid glob launches
     expect(s.bullets[0].hostile).toBe(true); // it damages the player
     expect(sp.cd).toBeGreaterThan(0); // on cooldown now
   });
@@ -53,16 +57,37 @@ describe('boomer (explode on death)', () => {
 });
 
 describe('stalker (lunge)', () => {
-  it('lunges at the player at high speed when the gap is right', () => {
+  it('braces (wind-up) before it lunges, then dashes at high speed toward the player', () => {
     const s = fresh();
     const st = spawnEnemy(s, 'stalker', { x: 700, y: 500 }); // 200px, within lunge range
     st.cd = 0;
-    updateEnemies(s.enemies, s.players, [], SIM_DT); // tick 1: charges + starts the lunge
-    expect(st.lunge).toBeGreaterThan(0);
-    updateEnemies(s.enemies, s.players, [], SIM_DT); // tick 2: the lunge dash fires
+    updateEnemies(s.enemies, s.players, [], SIM_DT); // tick 1: enters the braced wind-up
+    expect(st.windup).toBeGreaterThan(0); // telegraphing the pounce
+    expect(st.lunge ?? 0).toBe(0); // not lunging yet
+    const braceSpeed = Math.hypot(st.vel.x, st.vel.y);
+    expect(braceSpeed).toBeLessThan(ZOMBIES.stalker.speed); // braced: slower than a normal walk
+    let guard = 0;
+    while ((st.windup ?? 0) > 0 && guard++ < 200) updateEnemies(s.enemies, s.players, [], SIM_DT); // run out the wind-up
+    expect(st.lunge).toBeGreaterThan(0); // wind-up done → the lunge is armed
+    updateEnemies(s.enemies, s.players, [], SIM_DT); // the dash fires
     const speed = Math.hypot(st.vel.x, st.vel.y);
     expect(speed).toBeGreaterThan(STALKER_LUNGE_SPEED * 0.9); // moving fast, toward the player (-x)
     expect(st.vel.x).toBeLessThan(0);
+  });
+});
+
+describe('stalker (flank tactic)', () => {
+  it('biases its approach toward the player’s dark side, away from the flashlight aim', () => {
+    const s = fresh();
+    // Player at (500,500) aiming due +x (east); the dark side is behind them (west).
+    s.players[0].pos = { x: 500, y: 500 };
+    s.players[0].aimAngle = 0;
+    // Stalker due NORTH of the player: a straight seek would head purely south (vx≈0).
+    const st = spawnEnemy(s, 'stalker', { x: 500, y: 200 });
+    updateEnemies(s.enemies, s.players, [], SIM_DT);
+    expect(st.lunge ?? 0).toBe(0); // just approaching, not lunging
+    expect(st.vel.y).toBeGreaterThan(0); // still closing toward the player (south)
+    expect(st.vel.x).toBeLessThan(0); // …but steered WEST — circling to the unlit flank
   });
 });
 

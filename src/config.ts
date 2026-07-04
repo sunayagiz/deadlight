@@ -40,6 +40,7 @@ export const GUARANTEED_AMMO_EVERY = 5; // drop a Max Ammo every Nth cleared wav
 export const SPITTER_STANDOFF = 240; // px: spitters try to hold this range from a player
 export const SPITTER_RANGE = 470; // px: max range they'll lob acid
 export const SPITTER_FIRE_CD = 2.4; // s between acid shots
+export const SPITTER_WINDUP = 0.4; // s the spitter visibly charges before an acid glob launches (telegraph → sidestep it)
 export const SPITTER_ACID_SPEED = 380; // px/s
 export const SPITTER_ACID_DMG = 14; // per acid glob
 export const SPITTER_ACID_TTL = 2.0; // s
@@ -49,6 +50,9 @@ export const STALKER_LUNGE_RANGE = 300; // px: within this a stalker may lunge
 export const STALKER_LUNGE_CD = 3.2; // s between lunges
 export const STALKER_LUNGE_TIME = 0.28; // s the lunge dash lasts
 export const STALKER_LUNGE_SPEED = 470; // px/s during a lunge
+export const STALKER_WINDUP = 0.22; // s the stalker braces (a readable wind-up) before the lunge dash fires
+export const STALKER_BRACE_MULT = 0.12; // during wind-up the stalker near-stops / slightly retreats (× base speed) — coiling to pounce
+export const STALKER_FLANK = 0.55; // lateral steering bias (× seek) toward the player's dark side, away from their flashlight aim
 export const SPAWN_JITTER = 46; // px: random offset around a spawn zone so spawns don't stack
 export const ARMOR_MELEE_BONUS = 1.35; // melee damage multiplier vs armored enemies (melee is the answer)
 

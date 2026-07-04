@@ -19,10 +19,14 @@ import {
   SPITTER_FIRE_CD,
   SPITTER_RANGE,
   SPITTER_STANDOFF,
+  SPITTER_WINDUP,
+  STALKER_BRACE_MULT,
+  STALKER_FLANK,
   STALKER_LUNGE_CD,
   STALKER_LUNGE_RANGE,
   STALKER_LUNGE_SPEED,
   STALKER_LUNGE_TIME,
+  STALKER_WINDUP,
 } from '../config';
 import { affixHpMult, affixRegenPerSec, affixSpeedMult } from './affix';
 import { sampleFlow, type FlowField } from './flowfield';
@@ -178,6 +182,16 @@ export function updateEnemies(
     if (e.type === 'stalker' && (e.lunge ?? 0) > 0) {
       e.lunge = (e.lunge ?? 0) - dt;
       e.vel = { x: (tdx / tdist) * STALKER_LUNGE_SPEED, y: (tdy / tdist) * STALKER_LUNGE_SPEED };
+    } else if (e.type === 'stalker' && (e.windup ?? 0) > 0) {
+      // Wind-up: the stalker BRACES (near-stops, slight retreat) — a readable
+      // tell — then the lunge dash fires when the timer runs out.
+      e.windup = Math.max(0, (e.windup ?? 0) - dt);
+      const brace = def.speed * STALKER_BRACE_MULT;
+      e.vel = { x: -(tdx / tdist) * brace, y: -(tdy / tdist) * brace };
+      if (e.windup === 0) {
+        e.lunge = STALKER_LUNGE_TIME;
+        e.cd = STALKER_LUNGE_CD;
+      }
     } else {
       const seek =
         (flow && sampleFlow(flow, e.pos.x, e.pos.y)) ?? norm({ x: tdx, y: tdy });
@@ -188,18 +202,38 @@ export function updateEnemies(
         skx = -skx;
         sky = -sky;
       }
+      // Stalker pack tactic: lurk the player's DARK side. Bias the approach
+      // laterally toward the flank/rear away from the flashlight aim, so it
+      // slips in from where the beam isn't pointing. Cheap + deterministic;
+      // still normalized below, so flow-field pathing and wall collision hold.
+      if (e.type === 'stalker') {
+        const ax = Math.cos(tp.aimAngle);
+        const ay = Math.sin(tp.aimAngle);
+        const ux = tdx / tdist;
+        const uy = tdy / tdist;
+        const adotu = ax * ux + ay * uy;
+        let fx = adotu * ux - ax; // lateral push that rotates the approach toward the player's rear
+        let fy = adotu * uy - ay;
+        const fl = Math.hypot(fx, fy);
+        if (fl > 1e-4) {
+          skx += (fx / fl) * STALKER_FLANK;
+          sky += (fy / fl) * STALKER_FLANK;
+        }
+      }
       const sep = separation(e, enemies);
       const desired = norm({
         x: skx * spd + sep.x * ENEMY_SEPARATION_FORCE,
         y: sky * spd + sep.y * ENEMY_SEPARATION_FORCE,
       });
       e.vel = { x: desired.x * spd, y: desired.y * spd };
-      // Stalker charges a lunge and fires it when the gap is right.
+      // Stalker charges a lunge; when the gap is right it enters a braced
+      // wind-up (telegraph) that arms the dash rather than lunging outright.
       if (e.type === 'stalker') {
         e.cd = Math.max(0, (e.cd ?? STALKER_LUNGE_CD) - dt);
         if (e.cd === 0 && tdist < STALKER_LUNGE_RANGE) {
-          e.lunge = STALKER_LUNGE_TIME;
-          e.cd = STALKER_LUNGE_CD;
+          e.windup = STALKER_WINDUP;
+          const brace = def.speed * STALKER_BRACE_MULT;
+          e.vel = { x: -(tdx / tdist) * brace, y: -(tdy / tdist) * brace }; // brace immediately
         }
       }
     }
@@ -222,16 +256,11 @@ export function updateRangedEnemies(state: GameState, dt: number): void {
   const up = state.players.filter((p) => p.alive && !p.downed);
   if (up.length === 0) return;
   const solids = mapSolids(state);
-  for (const e of state.enemies) {
-    if (e.type !== 'spitter') continue;
-    e.cd = Math.max(0, (e.cd ?? SPITTER_FIRE_CD) - dt);
-    const tp = up.reduce((a, b) =>
+  const nearestUp = (e: EnemyState) =>
+    up.reduce((a, b) =>
       (a.pos.x - e.pos.x) ** 2 + (a.pos.y - e.pos.y) ** 2 <= (b.pos.x - e.pos.x) ** 2 + (b.pos.y - e.pos.y) ** 2 ? a : b,
     );
-    const dx = tp.pos.x - e.pos.x;
-    const dy = tp.pos.y - e.pos.y;
-    if (e.cd > 0 || dx * dx + dy * dy > SPITTER_RANGE * SPITTER_RANGE) continue;
-    if (!segmentClear(e.pos, tp.pos, solids)) continue;
+  const fire = (e: EnemyState, dx: number, dy: number): void => {
     const a = Math.atan2(dy, dx);
     state.bullets.push({
       id: state.nextBulletId++,
@@ -244,6 +273,33 @@ export function updateRangedEnemies(state: GameState, dt: number): void {
       hostile: true,
       owner: -1,
     });
-    e.cd = SPITTER_FIRE_CD;
+  };
+  for (const e of state.enemies) {
+    if (e.type !== 'spitter') continue;
+
+    // Charging: the spitter has committed to a shot and is visibly winding up.
+    // When the charge completes it fires — but only if the target is still in
+    // range with clear LOS, so a player who broke away isn't hit blind.
+    if ((e.windup ?? 0) > 0) {
+      e.windup = Math.max(0, (e.windup ?? 0) - dt);
+      if ((e.windup ?? 0) > 0) continue; // still charging this tick
+      const tp = nearestUp(e);
+      const dx = tp.pos.x - e.pos.x;
+      const dy = tp.pos.y - e.pos.y;
+      if (dx * dx + dy * dy <= SPITTER_RANGE * SPITTER_RANGE && segmentClear(e.pos, tp.pos, solids)) {
+        fire(e, dx, dy);
+      }
+      e.cd = SPITTER_FIRE_CD;
+      continue;
+    }
+
+    e.cd = Math.max(0, (e.cd ?? SPITTER_FIRE_CD) - dt);
+    const tp = nearestUp(e);
+    const dx = tp.pos.x - e.pos.x;
+    const dy = tp.pos.y - e.pos.y;
+    if (e.cd > 0 || dx * dx + dy * dy > SPITTER_RANGE * SPITTER_RANGE) continue;
+    if (!segmentClear(e.pos, tp.pos, solids)) continue;
+    // Begin the telegraphed charge instead of firing outright.
+    e.windup = SPITTER_WINDUP;
   }
 }

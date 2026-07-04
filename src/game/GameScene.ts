@@ -12,7 +12,7 @@ import {
   PLAYER_RADIUS,
   SIM_DT,
 } from '../config';
-import { AFFIXES } from '../sim/affix';
+import { AFFIXES, affixExplodesOnDeath } from '../sim/affix';
 import { interactCost, interactReady, nearestBuyable } from '../sim/cod';
 import { ZOMBIES, spawnEnemy } from '../sim/enemies';
 import { buildMap, mapSolids } from '../sim/map';
@@ -45,6 +45,9 @@ const COLORS = {
   hostileBullet: 0x8aff7a,
   dashTint: 0x9fb4d8,
   telegraphTint: 0xff9090,
+  stalkerWindup: 0xff2a2a, // stalker bracing to lunge — menacing red flash
+  spitterCharge: 0x8aff5a, // spitter charging an acid glob — sickly green glow
+  dangerAura: 0xff4a1a, // "about to blow" pulse behind boomers / volatile elites
   melee: 0xe8eaed,
   hpBack: 0x3a0d0d,
   hpFill: 0xc23b3b,
@@ -152,6 +155,8 @@ export class GameScene extends Phaser.Scene {
   private rocketSprites = new Map<number, Phaser.GameObjects.Image>();
   private enemySprites = new Map<number, Phaser.GameObjects.Image>();
   private affixAuras = new Map<number, Phaser.GameObjects.Arc>(); // faint elite glow behind affixed enemies
+  private dangerAuras = new Map<number, Phaser.GameObjects.Arc>(); // pulsing "about to blow" rings behind boomers / volatile elites
+  private chargingIds = new Set<number>(); // enemies mid wind-up last frame, so we sound the tension cue only on the rising edge
   private volatileIds = new Set<number>(); // volatile elites, so their death fires the boomer blast fx
   private lootSprites = new Map<number, Phaser.GameObjects.Image>();
   private bloodDecals: Phaser.GameObjects.Image[] = [];
@@ -1400,11 +1405,14 @@ export class GameScene extends Phaser.Scene {
       for (const id of this.smoothEnemy.keys()) if (!live.has(id)) this.smoothEnemy.delete(id);
     }
     this.volatileIds.clear();
+    // Rapid strobe drives the stalker's lunge tell — a menacing flicker, not a flat block.
+    const windupStrobe = Math.sin(this.state.time * 42) > -0.35;
     this.syncSprites(
       this.enemySprites,
       this.state.enemies.map((e) => {
         const sp = guest ? this.smooth(this.smoothEnemy, e.id, e.pos.x, e.pos.y, dt) : e.pos;
         if (e.affix === 'volatile') this.volatileIds.add(e.id); // detonates on death (like a boomer)
+        const winding = (e.windup ?? 0) > 0;
         return {
         id: e.id,
         x: sp.x,
@@ -1413,7 +1421,14 @@ export class GameScene extends Phaser.Scene {
         height: ZOMBIES[e.type].radius * 4.7,
         rotation: (e.vel.x || e.vel.y) ? Math.atan2(e.vel.y, e.vel.x) - ART_FACING : 0,
         visible: onScreen(e.pos.x, e.pos.y) && segmentClear(eye, e.pos, solids),
-        tintFill: e.boss && e.boss.telegraph > 0 ? COLORS.telegraphTint : e.hitFlash > 0 ? 0xffffff : undefined,
+        // Hit-flash (white) always wins so hits stay readable; then boss telegraph;
+        // then the special wind-up tells: stalker strobes red (about to pounce),
+        // spitter glows acid-green (charging a glob you can still sidestep).
+        tintFill: e.hitFlash > 0 ? 0xffffff
+          : e.boss && e.boss.telegraph > 0 ? COLORS.telegraphTint
+          : winding && e.type === 'stalker' && windupStrobe ? COLORS.stalkerWindup
+          : winding && e.type === 'spitter' ? COLORS.spitterCharge
+          : undefined,
         // elite colour-code — hit-flash (tintFill) still wins so hits stay readable
         tint: e.affix ? AFFIXES[e.affix].tint : undefined,
         wobble: e.boss ? 0.05 : 0.11, // shamble sway; heavier bodies sway less
@@ -1435,6 +1450,8 @@ export class GameScene extends Phaser.Scene {
       },
     );
     this.syncAffixAuras(); // pulsing elite glow rings behind affixed enemies
+    this.syncDangerAuras(); // pulsing "about to blow" rings behind boomers / volatile elites
+    this.syncTelegraphAudio(); // tension cue on the rising edge of a stalker / spitter wind-up
 
     // Loot: weapon drops show the actual weapon, ammo shows the ammo box.
     this.syncSprites(
@@ -1672,6 +1689,59 @@ export class GameScene extends Phaser.Scene {
         this.affixAuras.delete(id);
       }
     }
+  }
+
+  /**
+   * Persistent PULSING danger ring behind anything that detonates on death
+   * (boomers + volatile elites), sized to the blast radius so players read
+   * "don't melee this point-blank" at a glance. Pure render — keyed off type /
+   * affix, pooled by enemy id, throbbing harder/faster than the elite aura.
+   */
+  private syncDangerAuras(): void {
+    const t = this.state.time;
+    const seen = new Set<number>();
+    for (const e of this.state.enemies) {
+      if (!(e.type === 'boomer' || affixExplodesOnDeath(e))) continue;
+      const img = this.enemySprites.get(e.id);
+      if (!img || !img.visible) continue; // hidden in the dark → no aura
+      seen.add(e.id);
+      let ring = this.dangerAuras.get(e.id);
+      if (!ring) {
+        ring = this.add.circle(img.x, img.y, ZOMBIES[e.type].radius * 2.3, COLORS.dangerAura, 0.14).setDepth(DEPTH_BLOOD + 0.4);
+        this.dangerAuras.set(e.id, ring);
+      }
+      const beat = 0.5 + 0.5 * Math.sin(t * 7 + e.id); // fast, urgent throb
+      ring.setPosition(img.x, img.y).setScale(0.85 + 0.3 * beat).setFillStyle(COLORS.dangerAura, 0.1 + 0.14 * beat);
+    }
+    for (const [id, ring] of this.dangerAuras) {
+      if (!seen.has(id)) {
+        ring.destroy();
+        this.dangerAuras.delete(id);
+      }
+    }
+  }
+
+  /**
+   * Sound the tension cue the instant an enemy commits to a telegraphed wind-up
+   * (rising edge only, so it fires once per wind-up). Stalker → a sharp high
+   * snarl ("it's about to pounce"); spitter → a low charging growl. Volume
+   * falls off with distance from the local player.
+   */
+  private syncTelegraphAudio(): void {
+    const p = this.local();
+    const now = new Set<number>();
+    for (const e of this.state.enemies) {
+      if ((e.windup ?? 0) <= 0 || (e.type !== 'stalker' && e.type !== 'spitter')) continue;
+      now.add(e.id);
+      if (this.chargingIds.has(e.id)) continue; // already cued this wind-up
+      const dist = Math.hypot(e.pos.x - p.pos.x, e.pos.y - p.pos.y);
+      const vol = Math.max(0, (e.type === 'stalker' ? 0.6 : 0.42) * (1 - dist / 820));
+      if (vol > 0.04) {
+        if (e.type === 'stalker') this.sfx('snarl', vol, 1.55); // high, sharp — coiling to pounce
+        else this.sfx('growl', vol, 0.6); // low, guttural — charging acid
+      }
+    }
+    this.chargingIds = now;
   }
 
   /** Boomer death detonation — orange blast, shake, light flash. */

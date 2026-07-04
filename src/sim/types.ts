@@ -160,6 +160,7 @@ export interface EnemyState {
   hitFlash: number; // seconds of hit-flash left — pure view hint, still part of sim state
   boss?: BossBrain; // present only on boss enemies
   cd?: number; // generic ability cooldown — spitter acid shot / stalker lunge
+  windup?: number; // seconds left in a telegraphed wind-up (stalker brace before lunge / spitter charge before spit); serialized so clients render the tell
   lunge?: number; // stalker: seconds left in an active lunge (dash toward the player)
   affix?: AffixId; // elite modifier (stats + on-death effect); absent = a normal enemy
   maxHp?: number; // spawn HP (post-affix) — caps vampiric self-regen; present on affixed enemies
