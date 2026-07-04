@@ -65,6 +65,8 @@ export function createGameState(
     cash: 0,
     perks: {},
     perkDraft: null,
+    rerollCount: 0,
+    banished: [],
     extractPoint: { ...extractPoint },
     extraction: null,
     interactables: interactables.map((it) => ({ ...it })),
@@ -95,6 +97,8 @@ export function emptyInput(): PlayerInput {
     weaponCycle: 0,
     buy: -1,
     perk: -1,
+    reroll: false,
+    banish: -1,
     use: false,
   };
 }

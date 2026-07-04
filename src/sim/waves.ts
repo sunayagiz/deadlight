@@ -266,6 +266,7 @@ export function updateWaves(state: GameState, dt: number, rng: Rng = Math.random
     wave.timer = WAVE_INTERMISSION;
     // roguelite draft after every Nth wave cleared (not on the run into the finale)
     if (wave.index - 1 >= 1 && (wave.index - 1) % PERK_INTERVAL === 0 && !isFinalWave(wave.index)) {
+      state.rerollCount = 0; // fresh draft → reroll cost starts at REROLL_BASE
       state.perkDraft = rollDraft(state, rng);
     }
   }

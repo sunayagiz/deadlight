@@ -137,3 +137,9 @@ export const CASH_BOSS = 240; // flat bounty for downing a boss
 export const PERK_INTERVAL = 3; // offer a perk draft after every Nth wave cleared
 export const PERK_MAX_LEVEL = 5; // stack cap per perk
 export const PERK_CHOICES = 3; // options shown per draft
+// Draft agency (Brotato-style): pay to reroll the offered options or banish a
+// perk from the run's pool entirely. Reroll gets pricier each time within the
+// SAME draft (rerollCount resets when a new draft opens); banish is a flat cost.
+export const REROLL_BASE = 150; // cash for the first reroll of a draft
+export const REROLL_STEP = 150; // added per reroll already spent this draft (150 → 300 → 450 …)
+export const BANISH_COST = 250; // cash to permanently remove a perk from the run's pool

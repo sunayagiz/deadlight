@@ -32,6 +32,8 @@ export interface Snapshot {
   cash: number;
   perks: Record<string, number>;
   draft: string[] | null; // perkDraft
+  rr: number; // rerollCount (drives the reroll cost on guests)
+  ban: string[]; // banished perk ids
   extract: ExtractionState | null;
   inter: Interactable[]; // buyables (mystery box moves, so send them)
   pups: PowerUp[];
@@ -63,6 +65,8 @@ export function snapshot(s: GameState): Snapshot {
     cash: s.cash,
     perks: s.perks,
     draft: s.perkDraft,
+    rr: s.rerollCount,
+    ban: s.banished,
     extract: s.extraction,
     inter: s.interactables,
     pups: s.powerups,
@@ -98,6 +102,8 @@ export function applySnapshot(s: GameState, snap: Snapshot): void {
   s.cash = snap.cash;
   s.perks = snap.perks;
   s.perkDraft = snap.draft;
+  s.rerollCount = snap.rr;
+  s.banished = snap.ban;
   s.extraction = snap.extract;
   s.interactables = snap.inter;
   s.powerups = snap.pups;

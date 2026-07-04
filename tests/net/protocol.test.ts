@@ -28,6 +28,8 @@ describe('snapshot round-trip', () => {
     host.cash = 275;
     host.perks = { damage: 2, greed: 1 };
     host.perkDraft = ['speed', 'vigor', 'regen'];
+    host.rerollCount = 2;
+    host.banished = ['thorns', 'lifesteal'];
     host.won = false;
 
     // fresh guest with the same static map, empty dynamic state
@@ -37,6 +39,8 @@ describe('snapshot round-trip', () => {
     expect(guest.cash).toBe(275);
     expect(guest.perks).toEqual({ damage: 2, greed: 1 });
     expect(guest.perkDraft).toEqual(['speed', 'vigor', 'regen']);
+    expect(guest.rerollCount).toBe(2);
+    expect(guest.banished).toEqual(['thorns', 'lifesteal']);
     expect(guest.won).toBe(false);
     expect(guest.players.length).toBe(host.players.length);
     expect(guest.players[0].pos).toEqual(host.players[0].pos);

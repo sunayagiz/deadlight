@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import {
   AMBIENT_RADIUS,
+  BANISH_COST,
   EXTRACT_HOLD,
   EXTRACT_RADIUS,
   EXTRACTION_WAVE,
@@ -15,7 +16,7 @@ import { AFFIXES } from '../sim/affix';
 import { interactCost, interactReady, nearestBuyable } from '../sim/cod';
 import { ZOMBIES, spawnEnemy } from '../sim/enemies';
 import { buildMap, mapSolids } from '../sim/map';
-import { PERKS, effectiveMaxHp, type PerkId } from '../sim/perks';
+import { PERKS, effectiveMaxHp, rerollCost, type PerkId } from '../sim/perks';
 import { SHOP } from '../sim/shop';
 import { createGameState } from '../sim/state';
 import { stepSim } from '../sim/step';
@@ -188,9 +189,17 @@ export class GameScene extends Phaser.Scene {
   // container mis-tests once the camera scrolls, so we test pointer.x/y ourselves)
   private shopHit: { x0: number; y0: number; x1: number; y1: number; i: number }[] = [];
   private draftHit: { x0: number; y0: number; x1: number; y1: number; i: number }[] = [];
+  private banishHit: { x0: number; y0: number; x1: number; y1: number; i: number }[] = []; // ✕ per card
+  private rerollHit: { x0: number; y0: number; x1: number; y1: number } | null = null; // reroll button
   // perk draft overlay
   private draftRoot!: Phaser.GameObjects.Container;
-  private draftCards: { bg: Phaser.GameObjects.Rectangle; title: Phaser.GameObjects.Text; body: Phaser.GameObjects.Text }[] = [];
+  private draftCards: {
+    bg: Phaser.GameObjects.Rectangle;
+    title: Phaser.GameObjects.Text;
+    body: Phaser.GameObjects.Text;
+    banish: Phaser.GameObjects.Text;
+  }[] = [];
+  private rerollBtn!: { bg: Phaser.GameObjects.Rectangle; label: Phaser.GameObjects.Text };
   private pointerOverUI = false; // true while the cursor is over a shop/draft button (suppress fire)
   // extraction beacon (world-space) + on-screen escape bar
   private extractBeacon!: Phaser.GameObjects.Arc;
@@ -478,6 +487,13 @@ export class GameScene extends Phaser.Scene {
   private handleUiClick(px: number, py: number): void {
     if (this.state.gameOver) return;
     if (this.state.perkDraft) {
+      // banish ✕ sits inside its card, so test it before the card-pick rects
+      const canBanish = this.state.cash >= BANISH_COST;
+      if (canBanish) for (const c of this.banishHit) if (GameScene.hit(px, py, c)) { this.inputCollector.requestBanish(c.i); return; }
+      if (this.rerollHit && GameScene.hit(px, py, this.rerollHit)) {
+        if (this.state.cash >= rerollCost(this.state)) this.inputCollector.requestReroll();
+        return; // swallow the click even when unaffordable (don't fall through to a pick)
+      }
       for (const c of this.draftHit) if (GameScene.hit(px, py, c)) { this.inputCollector.requestPerk(c.i); return; }
       return;
     }
@@ -554,10 +570,24 @@ export class GameScene extends Phaser.Scene {
       const bg = this.add.rectangle(cx, 300, cw, 170, 0x0c140f, 0.98).setStrokeStyle(2, 0x3ea45a);
       const t = this.add.text(cx, 250, '', { fontFamily: 'monospace', fontSize: '17px', color: '#cfe8d4', fontStyle: 'bold', align: 'center', wordWrap: { width: cw - 20 } }).setOrigin(0.5);
       const b = this.add.text(cx, 320, '', { fontFamily: 'monospace', fontSize: '13px', color: '#8fef9f', align: 'center', wordWrap: { width: cw - 24 } }).setOrigin(0.5);
-      this.draftRoot.add([bg, t, b]);
-      this.draftCards.push({ bg, title: t, body: b });
+      // banish (✕) affordance in the card's top-right corner
+      const bxX = cx + cw / 2 - 16;
+      const bxY = 300 - 85 + 14;
+      const banish = this.add.text(bxX, bxY, '✕', { fontFamily: 'monospace', fontSize: '16px', color: '#c0554d', fontStyle: 'bold' }).setOrigin(0.5);
+      this.draftRoot.add([bg, t, b, banish]);
+      this.draftCards.push({ bg, title: t, body: b, banish });
       this.draftHit.push({ x0: cx - cw / 2, y0: 300 - 85, x1: cx + cw / 2, y1: 300 + 85, i });
+      this.banishHit.push({ x0: bxX - 13, y0: bxY - 13, x1: bxX + 13, y1: bxY + 13, i });
     }
+    // reroll button below the cards
+    const ry = 300 + 85 + 34;
+    const rbg = this.add.rectangle(480, ry, 200, 34, 0x101a12).setStrokeStyle(1, 0x3ea45a);
+    const rlabel = this.add.text(480, ry, '', { fontFamily: 'monospace', fontSize: '14px', color: '#cfe8d4', fontStyle: 'bold' }).setOrigin(0.5);
+    this.draftRoot.add([rbg, rlabel]);
+    this.rerollBtn = { bg: rbg, label: rlabel };
+    this.rerollHit = { x0: 480 - 100, y0: ry - 17, x1: 480 + 100, y1: ry + 17 };
+    const hint = this.add.text(480, ry + 30, 'reroll rolls new options  ·  ✕ banishes a perk for the run', { fontFamily: 'monospace', fontSize: '11px', color: '#4d6b55' }).setOrigin(0.5);
+    this.draftRoot.add(hint);
   }
 
   // ── COD layer: interactables / power-ups / announcer ────────────────────────
@@ -1313,6 +1343,8 @@ export class GameScene extends Phaser.Scene {
     const open = !!draft && !this.state.gameOver;
     this.draftRoot.setVisible(open);
     if (!open || !draft) return;
+    const ptr = this.input.activePointer;
+    const canBanish = this.state.cash >= BANISH_COST;
     this.draftCards.forEach((card, i) => {
       const id = draft[i] as PerkId | undefined;
       const shown = !!id;
@@ -1320,7 +1352,16 @@ export class GameScene extends Phaser.Scene {
       card.title.setVisible(shown).setText(id ? PERKS[id].name : '');
       const lvl = id ? this.state.perks[id] ?? 0 : 0;
       card.body.setVisible(shown).setText(id ? `${PERKS[id].desc}\n\n${lvl > 0 ? `owned ×${lvl}` : 'new'}` : '');
+      // banish ✕: bright when affordable + hovered, dim otherwise
+      const bHover = canBanish && !!this.banishHit[i] && GameScene.hit(ptr.x, ptr.y, this.banishHit[i]);
+      card.banish.setVisible(shown).setColor(!canBanish ? '#4a3d3b' : bHover ? '#ff7a6e' : '#c0554d');
     });
+    // reroll button: cost label + affordability styling
+    const cost = rerollCost(this.state);
+    const afford = this.state.cash >= cost;
+    const rHover = !!this.rerollHit && GameScene.hit(ptr.x, ptr.y, this.rerollHit);
+    this.rerollBtn.label.setText(`REROLL  $${cost}`).setColor(afford ? '#cfe8d4' : '#5a6b60');
+    this.rerollBtn.bg.setFillStyle(afford && rHover ? 0x1c3323 : 0x101a12).setAlpha(afford ? 1 : 0.5);
   }
 
   /** Final-wave escape objective: world beacon, off-screen arrow, and hold bar. */

@@ -18,6 +18,8 @@ export class InputCollector {
   private pendingCycle = 0;
   private pendingBuy = -1; // shop purchase requested by the HUD since the last sample
   private pendingPerk = -1; // perk-draft pick requested by the HUD since the last sample
+  private pendingReroll = false; // draft reroll requested by the HUD since the last sample
+  private pendingBanish = -1; // draft option to banish requested by the HUD since the last sample
 
   constructor(private scene: Phaser.Scene) {
     this.keys = scene.input.keyboard!.addKeys('W,A,S,D,SPACE,SHIFT,F') as Keys;
@@ -40,6 +42,12 @@ export class InputCollector {
   requestPerk(index: number): void {
     this.pendingPerk = index;
   }
+  requestReroll(): void {
+    this.pendingReroll = true;
+  }
+  requestBanish(index: number): void {
+    this.pendingBanish = index;
+  }
 
   sample(): PlayerInput {
     const pointer = this.scene.input.activePointer;
@@ -48,10 +56,14 @@ export class InputCollector {
     const cycle = this.pendingCycle;
     const buy = this.pendingBuy;
     const perk = this.pendingPerk;
+    const reroll = this.pendingReroll;
+    const banish = this.pendingBanish;
     this.pendingSlot = -1;
     this.pendingCycle = 0;
     this.pendingBuy = -1;
     this.pendingPerk = -1;
+    this.pendingReroll = false;
+    this.pendingBanish = -1;
     return {
       moveX: (this.keys.D.isDown ? 1 : 0) - (this.keys.A.isDown ? 1 : 0),
       moveY: (this.keys.S.isDown ? 1 : 0) - (this.keys.W.isDown ? 1 : 0),
@@ -64,6 +76,8 @@ export class InputCollector {
       weaponCycle: cycle,
       buy,
       perk,
+      reroll,
+      banish,
       use: Phaser.Input.Keyboard.JustDown(this.keys.F),
     };
   }

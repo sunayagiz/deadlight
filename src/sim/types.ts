@@ -16,6 +16,8 @@ export interface PlayerInput {
   weaponCycle: number; // cycle owned weapons: -1 prev, +1 next, 0 none
   buy: number; // shop purchase index this tick (intermission only); -1 = none
   perk: number; // perk-draft choice this tick (0..PERK_CHOICES-1); -1 = none
+  reroll: boolean; // reroll the current perk draft for cash this tick (intermission only)
+  banish: number; // banish draft option i (0..PERK_CHOICES-1) from the run's pool; -1 = none
   use: boolean; // interact with the nearest buyable (door/box/PaP/wall/power) this tick
 }
 
@@ -215,6 +217,8 @@ export interface GameState {
   cash: number; // shared squad currency, spent in the between-wave shop
   perks: Record<string, number>; // shared squad perk levels (perk id → stacks)
   perkDraft: string[] | null; // 3 perk ids offered right now, or null when no draft is pending
+  rerollCount: number; // rerolls spent on the CURRENT draft (drives the rising reroll cost); resets per draft
+  banished: string[]; // perk ids banished for the rest of the run; rollDraft excludes these forever
   extractPoint: { x: number; y: number }; // static exit location (from the map; off-wire)
   extraction: ExtractionState | null; // live escape progress once the final wave begins
   // ── COD-Zombies layer ──

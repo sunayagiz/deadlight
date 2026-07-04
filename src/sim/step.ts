@@ -9,7 +9,7 @@ import { updateLoot } from './loot';
 import { mapSolids, updateDoors } from './map';
 import { updateMelee } from './melee';
 import { updateDash, updateMovement } from './movement';
-import { choosePerk, effectiveMaxHp, regenPerSec, speedMult } from './perks';
+import { banishPerk, choosePerk, effectiveMaxHp, regenPerSec, rerollDraft, speedMult } from './perks';
 import { buy } from './shop';
 import { updateWaves, type Rng } from './waves';
 import { cycleWeapon, equipWeapon, updateAim, updateBullets, updateFiring } from './weapons';
@@ -58,6 +58,10 @@ export function stepSim(
     // between-wave shop + perk draft (host-authoritative via input)
     if (intermission) {
       if (input.buy >= 0) buy(state, i, input.buy);
+      // draft agency (host-authoritative): banish/reroll resolve before a pick so
+      // a player can shape the options in the same tick they act on them
+      if (input.banish >= 0 && state.perkDraft) banishPerk(state, input.banish, rng);
+      if (input.reroll && state.perkDraft) rerollDraft(state, rng);
       if (input.perk >= 0 && state.perkDraft) choosePerk(state, input.perk);
     }
   });
