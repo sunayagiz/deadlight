@@ -60,6 +60,16 @@ describe('loot pickup', () => {
     expect(s.player.ammo.minigun).toBeGreaterThan(10);
   });
 
+  it('never reduces ammo already above the top-up ceiling (e.g. stacked from repeat buys)', () => {
+    const s = createGameState([]);
+    s.player.pos = { x: 100, y: 100 };
+    s.player.owned.push('minigun');
+    s.player.ammo.minigun = 2000; // above startAmmo*2 (800), reachable via repeat shop/box grants
+    place(s, { kind: 'ammo', pos: { x: 100, y: 100 } });
+    updateLoot(s, SIM_DT);
+    expect(s.player.ammo.minigun).toBe(2000);
+  });
+
   it('does not pick up loot that is out of reach, and despawns it after ttl', () => {
     const s = createGameState([]);
     s.player.pos = { x: 0, y: 0 };
