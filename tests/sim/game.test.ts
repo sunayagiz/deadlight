@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { PLAYER_MAX_HP, SIM_DT } from '../../src/config';
+import { BLEEDOUT_TIME, PLAYER_MAX_HP, SIM_DT } from '../../src/config';
 import { spawnEnemy } from '../../src/sim/enemies';
 import { createGameState, emptyInput } from '../../src/sim/state';
 import { stepSim } from '../../src/sim/step';
@@ -28,8 +28,9 @@ describe('game loop integration', () => {
   it('freezes the world once the player dies', () => {
     const s = createGameState(testRoomWalls(), testRoomSpawnZones());
     s.player.hp = 1;
+    s.player.selfReviveCharges = 0; // no Quick Revive: the lethal hit downs, then bleeds out to death
     spawnEnemy(s, 'runner', { x: s.player.pos.x + 22, y: s.player.pos.y }); // adjacent → lethal contact, deterministic
-    run(s, 3);
+    run(s, BLEEDOUT_TIME + 2); // down first, then bleed out with no charges → gameOver
     expect(s.gameOver).toBe(true);
     const enemiesAtDeath = s.enemies.length;
     const timeAtDeath = s.time;

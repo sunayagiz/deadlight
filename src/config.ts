@@ -14,6 +14,11 @@ export const REVIVE_RADIUS = 56; // px: a standing teammate this close revives a
 export const REVIVE_TIME = 2.4; // s of proximity to fully revive
 export const REVIVE_HP = 45; // hp restored on revive
 export const BLEEDOUT_TIME = 24; // s a downed player survives before dying
+export const DOWNED_CRAWL_SPEED = 90; // px/s a downed (but alive) player can crawl toward safety — defenseless, no sprint/dash
+// Solo self-revive (COD "Quick Revive"): a solo run no longer ends on the first
+// lethal hit — the player goes down and, if a charge remains, revives themselves.
+export const SELF_REVIVE_CHARGES = 2; // self-revives available on a solo run
+export const SELF_REVIVE_TIME = 4; // s a downed solo player takes to self-revive
 
 export const DASH_SPEED = 640; // px/s
 export const DASH_DURATION = 0.15; // s

@@ -16,17 +16,14 @@ function hittable(p: PlayerState): boolean {
   return isUp(p) && p.hp > 0 && !isInvulnerable(p);
 }
 
-/** Apply damage; a lethal hit downs the player — or kills outright when solo (no one to revive). */
+/**
+ * Apply damage; a lethal hit downs the player (co-op: a teammate revives; solo:
+ * self-revive via Quick Revive charges). Only when a downed player finally bleeds
+ * out do they die — that death path lives in updateRevives, not here.
+ */
 function hurt(state: GameState, p: PlayerState, dmg: number): void {
   p.hp -= dmg;
-  if (p.hp <= 0) {
-    if (state.players.length <= 1) {
-      p.hp = 0;
-      p.alive = false;
-    } else {
-      downPlayer(p);
-    }
-  }
+  if (p.hp <= 0) downPlayer(p);
 }
 
 /** A death detonation (boomer, or a volatile elite): every standing player in the blast takes damage (dash dodges it). */

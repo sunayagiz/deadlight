@@ -8,7 +8,7 @@ import { getFlowField } from './flowfield';
 import { updateLoot } from './loot';
 import { mapSolids, updateDoors } from './map';
 import { updateMelee } from './melee';
-import { updateDash, updateMovement } from './movement';
+import { updateCrawl, updateDash, updateMovement } from './movement';
 import { banishPerk, choosePerk, effectiveMaxHp, regenPerSec, rerollDraft, speedMult } from './perks';
 import { buy } from './shop';
 import { updateWaves, type Rng } from './waves';
@@ -41,9 +41,14 @@ export function stepSim(
   const regen = regenPerSec(state);
   const intermission = state.wave.phase === 'intermission';
 
-  // Each standing player acts on their own input; downed/dead players are inert.
+  // Each standing player acts on their own input. Downed-but-alive players are
+  // NOT up (isUp stays false everywhere — targeting, spawns, flashlight), but
+  // they can still drag themselves toward safety at a crawl; the dead are inert.
   state.players.forEach((p, i) => {
-    if (!isUp(p)) return;
+    if (!isUp(p)) {
+      if (p.alive && p.downed) updateCrawl(p, list[i] ?? emptyInput(), solids, dt);
+      return;
+    }
     const input = list[i] ?? emptyInput();
     // weapon switching flows through input so it's netcode-safe (guests too)
     if (input.weaponSlot >= 0 && input.weaponSlot < p.owned.length) equipWeapon(p, p.owned[input.weaponSlot]);

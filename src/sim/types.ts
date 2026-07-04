@@ -56,7 +56,8 @@ export interface PlayerState {
   alive: boolean; // false = fully dead (bled out), a spectator
   downed: boolean; // true = on the ground, revivable by a teammate
   bleedout: number; // seconds left before a downed player dies
-  reviveProgress: number; // 0..1 while a teammate is reviving this one
+  reviveProgress: number; // 0..1 while a teammate (or a solo self-revive) is reviving this one
+  selfReviveCharges: number; // solo "Quick Revive" charges left; a downed solo player self-revives while >0
 }
 
 /** A player is a live combat threat only while up. */

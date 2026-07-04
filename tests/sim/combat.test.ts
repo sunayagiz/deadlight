@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { PLAYER_MAX_HP, SIM_DT } from '../../src/config';
+import { BLEEDOUT_TIME, PLAYER_MAX_HP, SIM_DT } from '../../src/config';
 import { updateCombat } from '../../src/sim/combat';
+import { updateRevives } from '../../src/sim/coop';
 import { ZOMBIES, spawnEnemy } from '../../src/sim/enemies';
-import { createGameState } from '../../src/sim/state';
+import { createGameState, emptyInput } from '../../src/sim/state';
 import type { BulletState } from '../../src/sim/types';
 
 function bullet(x: number, y: number, damage: number): BulletState {
@@ -54,14 +55,29 @@ describe('combat', () => {
     expect(s.player.hp).toBe(PLAYER_MAX_HP);
   });
 
-  it('a solo player dies (no revive possible) when hp runs out', () => {
+  it('a solo lethal hit DOWNS the player (Quick Revive), not instant death, while charges remain', () => {
     const s = createGameState([]); // 1 player
     s.player.pos = { x: 100, y: 100 };
     s.player.hp = 1;
+    expect(s.player.selfReviveCharges).toBeGreaterThan(0);
     spawnEnemy(s, 'brute', { x: 100, y: 100 });
     for (let i = 0; i < 10; i++) updateCombat(s, SIM_DT);
     expect(s.player.hp).toBe(0);
-    expect(s.player.alive).toBe(false); // solo => dead outright; stepSim raises gameOver
+    expect(s.player.downed).toBe(true); // downed, not dead — solo can self-revive
+    expect(s.player.alive).toBe(true);
+  });
+
+  it('a solo player with no self-revive charges bleeds out to death', () => {
+    const s = createGameState([]); // 1 player
+    s.player.pos = { x: 100, y: 100 };
+    s.player.hp = 1;
+    s.player.selfReviveCharges = 0; // spent them all
+    spawnEnemy(s, 'brute', { x: 100, y: 100 });
+    for (let i = 0; i < 10; i++) updateCombat(s, SIM_DT);
+    expect(s.player.downed).toBe(true); // still downed first (bleedout runs in updateRevives)
+    const ticks = Math.ceil(BLEEDOUT_TIME / SIM_DT) + 2;
+    for (let i = 0; i < ticks; i++) updateRevives(s, [emptyInput()], SIM_DT);
+    expect(s.player.alive).toBe(false); // bled out => dead; stepSim raises gameOver
   });
 });
 

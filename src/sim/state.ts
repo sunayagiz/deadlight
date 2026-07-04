@@ -1,4 +1,4 @@
-import { PLAYER_MAX_HP, WAVE_INTERMISSION } from '../config';
+import { PLAYER_MAX_HP, SELF_REVIVE_CHARGES, WAVE_INTERMISSION } from '../config';
 import type { Door, GameState, Interactable, PlayerInput, PlayerState, SpawnZone, Wall } from './types';
 
 export function createPlayer(x: number, y: number): PlayerState {
@@ -18,6 +18,7 @@ export function createPlayer(x: number, y: number): PlayerState {
     downed: false,
     bleedout: 0,
     reviveProgress: 0,
+    selfReviveCharges: SELF_REVIVE_CHARGES,
   };
 }
 

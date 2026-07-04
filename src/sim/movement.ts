@@ -2,6 +2,7 @@ import {
   DASH_COOLDOWN,
   DASH_DURATION,
   DASH_SPEED,
+  DOWNED_CRAWL_SPEED,
   PLAYER_RADIUS,
   PLAYER_SPEED,
   SPRINT_MULT,
@@ -35,6 +36,26 @@ export function updateMovement(
   }
 
   // Per-axis integration: blocked axis clamps to the wall face, free axis keeps moving (wall slide).
+  let nx = p.pos.x + p.vel.x * dt;
+  const wx = hitWall(nx, p.pos.y, walls);
+  if (wx) nx = p.vel.x > 0 ? wx.x - PLAYER_RADIUS : wx.x + wx.w + PLAYER_RADIUS;
+  p.pos.x = nx;
+
+  let ny = p.pos.y + p.vel.y * dt;
+  const wy = hitWall(p.pos.x, ny, walls);
+  if (wy) ny = p.vel.y > 0 ? wy.y - PLAYER_RADIUS : wy.y + wy.h + PLAYER_RADIUS;
+  p.pos.y = ny;
+}
+
+/**
+ * A downed (but still alive) player drags themselves toward safety at a crawl.
+ * Reads only moveX/moveY — no sprint, no dash, no i-frames: they're defenseless.
+ * Same per-axis wall-slide collision as normal movement.
+ */
+export function updateCrawl(p: PlayerState, input: PlayerInput, walls: Wall[], dt: number): void {
+  const dir = norm({ x: input.moveX, y: input.moveY });
+  p.vel = { x: dir.x * DOWNED_CRAWL_SPEED, y: dir.y * DOWNED_CRAWL_SPEED };
+
   let nx = p.pos.x + p.vel.x * dt;
   const wx = hitWall(nx, p.pos.y, walls);
   if (wx) nx = p.vel.x > 0 ? wx.x - PLAYER_RADIUS : wx.x + wx.w + PLAYER_RADIUS;

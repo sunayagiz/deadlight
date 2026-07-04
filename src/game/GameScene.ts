@@ -161,6 +161,8 @@ export class GameScene extends Phaser.Scene {
   private dashGhostCd = 0;
   private hurtFx = 0;
   private hurtOverlay!: Phaser.GameObjects.Rectangle;
+  private downOverlay!: Phaser.GameObjects.Rectangle; // desaturating vignette while the local player is downed
+  private downedHud!: Phaser.GameObjects.Text; // centered "GET UP" / self-revive prompt when downed
   private prevHp = 0;
   private prevWavePhase = '';
   private prevOpenDoors = 0;
@@ -438,6 +440,17 @@ export class GameScene extends Phaser.Scene {
       .rectangle(480, 270, 960, 540, 0x8a0f14, 0)
       .setScrollFactor(0)
       .setDepth(DEPTH_HUD - 1);
+    // Downed vignette: a dark, desaturated overlay while the local player is on the ground.
+    this.downOverlay = this.add
+      .rectangle(480, 270, 960, 540, 0x120204, 0)
+      .setScrollFactor(0)
+      .setDepth(DEPTH_HUD - 1);
+    this.downedHud = this.add
+      .text(480, 300, '', { fontFamily: 'monospace', fontSize: '18px', color: '#ff6b80', fontStyle: 'bold', align: 'center' })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(DEPTH_HUD)
+      .setVisible(false);
     this.prevHp = this.local().hp;
     this.prevWavePhase = this.state.wave.phase;
 
@@ -1328,6 +1341,24 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.cashHud.setText(`$ ${this.state.cash}`);
+
+    // Downed feedback: dark vignette + a centered prompt showing self-revive state.
+    if (lp.downed && lp.alive) {
+      this.downOverlay.setAlpha(0.34);
+      const pct = Math.floor(lp.reviveProgress * 100);
+      const charges = lp.selfReviveCharges;
+      const line =
+        this.role === 'solo'
+          ? charges > 0
+            ? `DOWNED — QUICK REVIVE ${pct}%\nself-revives left: ${charges}`
+            : `DOWNED — NO REVIVES LEFT\nbleeding out: ${Math.ceil(lp.bleedout)}s`
+          : `DOWNED — WAIT FOR A TEAMMATE\nbleeding out: ${Math.ceil(lp.bleedout)}s`;
+      this.downedHud.setText(line).setVisible(true);
+    } else {
+      this.downOverlay.setAlpha(0);
+      this.downedHud.setVisible(false);
+    }
+
     if (this.dailyHud) this.dailyHud.setText(`DAILY · ${this.seed}   SCORE ${this.runScore()}`);
     this.updateShopUI();
     this.updateDraftUI();
