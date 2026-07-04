@@ -319,7 +319,13 @@ export class GameScene extends Phaser.Scene {
       this.state.wave.timer = 0.8;
     }
     const wpn = qs.get('wpn');
-    if (wpn && wpn in WEAPONS) {
+    if (wpn === 'all') {
+      // ?wpn=all: playtest convenience — every weapon in the arsenal, fully loaded.
+      (Object.keys(WEAPONS) as (keyof typeof WEAPONS)[]).forEach((id) => {
+        if (!this.state.player.owned.includes(id)) this.state.player.owned.push(id);
+        if (WEAPONS[id].startAmmo !== undefined) this.state.player.ammo[id] = 999;
+      });
+    } else if (wpn && wpn in WEAPONS) {
       const id = wpn as keyof typeof WEAPONS;
       if (!this.state.player.owned.includes(id)) this.state.player.owned.push(id);
       this.state.player.weapon = id;
