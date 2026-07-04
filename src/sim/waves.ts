@@ -9,6 +9,7 @@ import {
   FLASHLIGHT_RANGE,
   PERK_INTERVAL,
   POWERUP_TTL,
+  SPAWN_JITTER,
   SPAWN_MIN_DIST,
   SPAWN_RETRY,
   SPAWN_SIGHT_DIST,
@@ -65,6 +66,9 @@ export function waveBudget(index: number): number {
 function affordable(index: number, budget: number): EnemyType[] {
   const pool: EnemyType[] = ['shambler', 'runner'];
   if (index >= BRUTE_MIN_WAVE) pool.push('brute');
+  if (index >= 4) pool.push('boomer'); // explodes on death
+  if (index >= 5) pool.push('spitter'); // ranged acid
+  if (index >= 6) pool.push('stalker'); // lunging lurker
   return pool.filter((t) => ZOMBIES[t].cost <= budget);
 }
 
@@ -81,6 +85,12 @@ function weightFor(type: EnemyType, index: number): number {
       return 1 + index * 0.12;
     case 'brute':
       return 0.3 + index * 0.06;
+    case 'boomer':
+      return 0.3 + index * 0.05;
+    case 'spitter':
+      return 0.25 + index * 0.05;
+    case 'stalker':
+      return 0.25 + index * 0.05;
     default:
       return 1;
   }
@@ -145,11 +155,17 @@ export function zoneValid(state: GameState, z: SpawnZone, flow?: FlowField): boo
   return true;
 }
 
-/** A random valid zone, or null when every zone is currently watched/locked (caller retries). */
-function pickZone(state: GameState, rng: Rng, flow?: FlowField): SpawnZone | null {
+/**
+ * A valid zone, round-robined across all currently-valid zones so the horde
+ * enters from many points instead of stacking on one. Null when every zone is
+ * watched/locked (caller retries).
+ */
+function pickZone(state: GameState, flow?: FlowField): SpawnZone | null {
   const valid = state.spawnZones.filter((z) => zoneValid(state, z, flow));
   if (valid.length === 0) return state.spawnZones.length === 0 ? { x: 24, y: 24 } : null;
-  return valid[Math.floor(rng() * valid.length) % valid.length];
+  const idx = state.wave.spawnCursor % valid.length;
+  state.wave.spawnCursor = (state.wave.spawnCursor + 1) % 1_000_000;
+  return valid[idx];
 }
 
 /** Least-bad zone for a boss entrance: reachable, unlocked, farthest from the squad's centroid. */
@@ -202,10 +218,16 @@ export function updateWaves(state: GameState, dt: number, rng: Rng = Math.random
   const atCap = state.enemies.length >= maxAlive(squad, wave.index);
   wave.spawnCooldown -= dt;
   if (wave.spawnQueue.length > 0 && wave.spawnCooldown <= 0 && !atCap) {
-    const zone = pickZone(state, rng, flow);
+    const zone = pickZone(state, flow);
     if (zone) {
       const type = wave.spawnQueue.shift()!;
-      spawnEnemy(state, type, zone);
+      // jitter the exact point so a burst from one zone still fans out
+      const jz = {
+        x: zone.x + (rng() - 0.5) * 2 * SPAWN_JITTER,
+        y: zone.y + (rng() - 0.5) * 2 * SPAWN_JITTER,
+        minWave: zone.minWave,
+      };
+      spawnEnemy(state, type, jz);
       wave.spawnCooldown = WAVE_SPAWN_INTERVAL;
     } else {
       wave.spawnCooldown = SPAWN_RETRY;

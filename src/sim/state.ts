@@ -55,6 +55,7 @@ export function createGameState(
       spawnQueue: [],
       spawnCooldown: 0,
       killsThisWave: 0,
+      spawnCursor: 0,
     },
     spawnZones: [...spawnZones],
     walls: [...walls], // copy: each GameState must be an independent snapshot (netcode)

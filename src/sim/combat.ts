@@ -1,4 +1,4 @@
-import { BULLET_KNOCKBACK, CASH_BOSS, CASH_PER_HIT, CASH_PER_KILL, PLAYER_RADIUS, POWERUP_DROP_CHANCE } from '../config';
+import { BOOMER_BLAST_DMG, BOOMER_BLAST_RADIUS, BULLET_KNOCKBACK, CASH_BOSS, CASH_PER_HIT, CASH_PER_KILL, PLAYER_RADIUS, POWERUP_DROP_CHANCE } from '../config';
 import { cashMult, dropPowerUp, rollPowerUp } from './cod';
 import { downPlayer } from './coop';
 import { ZOMBIES } from './enemies';
@@ -25,6 +25,17 @@ function hurt(state: GameState, p: PlayerState, dmg: number): void {
     } else {
       downPlayer(p);
     }
+  }
+}
+
+/** A dying boomer detonates: every standing player in the blast takes damage (dash dodges it). */
+function boomerBlast(state: GameState, at: Vec2): void {
+  const r2 = BOOMER_BLAST_RADIUS * BOOMER_BLAST_RADIUS;
+  for (const p of state.players) {
+    if (!hittable(p)) continue;
+    const dx = p.pos.x - at.x;
+    const dy = p.pos.y - at.y;
+    if (dx * dx + dy * dy <= r2) hurt(state, p, BOOMER_BLAST_DMG);
   }
 }
 
@@ -144,6 +155,7 @@ export function updateCombat(state: GameState, dt: number, rng: () => number = M
       state.cash += Math.round(bounty * greed * cm); // Double Points doubles kill cash too
       dropLoot(state, e.pos, rng);
       if (rng() < POWERUP_DROP_CHANCE) dropPowerUp(state, e.pos.x, e.pos.y, rollPowerUp(rng));
+      if (e.type === 'boomer') boomerBlast(state, e.pos); // explodes on death — mind your kills
     }
   }
   state.enemies = alive;

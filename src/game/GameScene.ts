@@ -68,6 +68,7 @@ const DEPTH_HUD = 20;
 
 const ASSETS = [
   'player', 'shambler', 'runner', 'brute', 'bloater', 'screamer', 'hound',
+  'spitter', 'boomer', 'stalker',
   'wpn_pistol', 'wpn_smg', 'wpn_shotgun', 'wpn_machinegun', 'wpn_minigun',
   'wpn_rpg', 'wpn_katana', 'wpn_bat', 'wpn_chainsaw', 'wpn_raygun',
   'crate', 'ammo', 'health', 'muzzle', 'explosion', 'rocket', 'blood',
@@ -273,11 +274,12 @@ export class GameScene extends Phaser.Scene {
       this.state.player.ammo[id] = 999;
     }
     if (qs.get('zoo')) {
-      const types = ['shambler', 'runner', 'brute', 'bloater', 'screamer'] as const;
+      const types = ['shambler', 'runner', 'brute', 'bloater', 'screamer', 'hound', 'spitter', 'boomer', 'stalker'] as const;
       types.forEach((t, i) =>
-        spawnEnemy(this.state, t, { x: map.playerStart.x - 220 + i * 90, y: map.playerStart.y - 160 }),
+        spawnEnemy(this.state, t, { x: map.playerStart.x - 380 + i * 95, y: map.playerStart.y - 200 }),
       );
-      this.state.wave.timer = 9999; // hold the wave so the lineup stays put
+      this.state.wave.phase = 'active'; // active so no shop overlay hides the lineup
+      this.state.wave.spawnQueue = [];
     }
     // ?ext jumps to the final escape wave next to the exit; ?cash/?perk seed the shop/draft.
     if (qs.has('ext')) {
@@ -746,18 +748,19 @@ export class GameScene extends Phaser.Scene {
   private gameFeelEvents(dt: number): void {
     const p = this.local();
 
-    // took damage → red vignette + shake + grunt
+    // took damage → bright red screen flash + shake + grunt (clear "I'm hit" feedback)
     if (p.hp < this.prevHp - 0.01) {
       const lost = this.prevHp - p.hp;
-      this.hurtFx = Math.min(1, this.hurtFx + lost * 0.06);
+      this.hurtFx = Math.min(1, this.hurtFx + lost * 0.08);
+      if (lost > 1) this.hurtFx = Math.max(this.hurtFx, 0.5); // any real hit pops clearly
       if (lost > 2) {
-        this.cameras.main.shake(90, 0.004);
-        this.sfx('hurt', 0.5);
+        this.cameras.main.shake(110, 0.005);
+        this.sfx('hurt', 0.55);
       }
     }
     this.prevHp = p.hp;
-    this.hurtFx = Math.max(0, this.hurtFx - dt * 1.6);
-    this.hurtOverlay.setFillStyle(0x8a0f14, this.hurtFx * 0.4);
+    this.hurtFx = Math.max(0, this.hurtFx - dt * 2.0);
+    this.hurtOverlay.setFillStyle(0xff1414, this.hurtFx * 0.5); // bright red, readable
 
     // heartbeat when near death
     const dying = p.hp > 0 && p.hp < 30 && !this.state.gameOver;
@@ -1146,6 +1149,7 @@ export class GameScene extends Phaser.Scene {
         };
       }),
       (lastX, lastY, id, img) => {
+        if (img.texture.key === 'boomer') this.boomerExplode(lastX, lastY); // detonates on death
         this.spawnGore(lastX, lastY); // pool + flying flesh/bone gibs
         // corpse: the sprite stays behind, blood-darkened, and slowly soaks away
         const corpse = this.add
@@ -1309,6 +1313,16 @@ export class GameScene extends Phaser.Scene {
         this.explosiveBullets.delete(id);
       }
     }
+  }
+
+  /** Boomer death detonation — orange blast, shake, light flash. */
+  private boomerExplode(x: number, y: number): void {
+    const boom = this.add.image(x, y, 'explosion').setAlpha(0.95).setTint(0xff7a3a);
+    this.setSpriteHeight(boom, 110);
+    this.tweens.add({ targets: boom, alpha: 0, scale: boom.scale * 1.6, duration: 280, onComplete: () => boom.destroy() });
+    this.cameras.main.shake(120, 0.005);
+    this.lightPulses.push({ x, y, life: 0.26, max: 0.26, size: 280 });
+    this.sfx('explosion', 0.5);
   }
 
   /** Diffing renderer for circles (bullet tracers) — draws from the shared pool. */

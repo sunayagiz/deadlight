@@ -13,8 +13,20 @@ import {
   MAX_ALIVE_CEIL,
   MAX_ALIVE_PER_PLAYER,
   MAX_ALIVE_PER_WAVE,
+  SPITTER_ACID_DMG,
+  SPITTER_ACID_SPEED,
+  SPITTER_ACID_TTL,
+  SPITTER_FIRE_CD,
+  SPITTER_RANGE,
+  SPITTER_STANDOFF,
+  STALKER_LUNGE_CD,
+  STALKER_LUNGE_RANGE,
+  STALKER_LUNGE_SPEED,
+  STALKER_LUNGE_TIME,
 } from '../config';
 import { sampleFlow, type FlowField } from './flowfield';
+import { mapSolids } from './map';
+import { segmentClear } from './vision';
 import { norm } from './vec';
 import type { EnemyState, EnemyType, GameState, PlayerState, SpawnZone, Wall } from './types';
 
@@ -67,6 +79,12 @@ export const ZOMBIES: Record<EnemyType, EnemyDef> = {
   screamer: { type: 'screamer', name: 'Screamer', hp: 650, speed: 72, radius: 26, contactDamage: 25, cost: 0, boss: true },
   // Hellhound — fast, fragile, glowing; only in dog special rounds.
   hound: { type: 'hound', name: 'Hellhound', hp: 45, speed: 178, radius: 12, contactDamage: 22, cost: 2 },
+  // Spitter — ranged: holds its distance and lobs acid at you.
+  spitter: { type: 'spitter', name: 'Spitter', hp: 90, speed: 58, radius: 13, contactDamage: 12, cost: 3 },
+  // Boomer — fast bloated rusher that explodes on death (mind your kills).
+  boomer: { type: 'boomer', name: 'Boomer', hp: 70, speed: 118, radius: 16, contactDamage: 14, cost: 3 },
+  // Stalker — lean lurker that periodically lunges across the gap.
+  stalker: { type: 'stalker', name: 'Stalker', hp: 55, speed: 98, radius: 11, contactDamage: 20, cost: 3 },
 };
 
 export function isBoss(type: EnemyType): boolean {
@@ -136,16 +154,40 @@ export function updateEnemies(
     // Route via the flow field (handles rooms/doors, already multi-source); fall
     // back to straight seek toward the nearest player when off-grid/unreachable.
     const tp = nearest(e);
-    const seek =
-      (flow && sampleFlow(flow, e.pos.x, e.pos.y)) ??
-      norm({ x: tp.pos.x - e.pos.x, y: tp.pos.y - e.pos.y });
-    const sep = separation(e, enemies);
     const spd = def.speed * speedScale; // per-wave ramp (COD: walkers → sprinters)
-    const desired = norm({
-      x: seek.x * spd + sep.x * ENEMY_SEPARATION_FORCE,
-      y: seek.y * spd + sep.y * ENEMY_SEPARATION_FORCE,
-    });
-    e.vel = { x: desired.x * spd, y: desired.y * spd };
+    const tdx = tp.pos.x - e.pos.x;
+    const tdy = tp.pos.y - e.pos.y;
+    const tdist = Math.hypot(tdx, tdy) || 1;
+
+    // Stalker mid-lunge: dash straight at the player, ignoring flow + separation.
+    if (e.type === 'stalker' && (e.lunge ?? 0) > 0) {
+      e.lunge = (e.lunge ?? 0) - dt;
+      e.vel = { x: (tdx / tdist) * STALKER_LUNGE_SPEED, y: (tdy / tdist) * STALKER_LUNGE_SPEED };
+    } else {
+      const seek =
+        (flow && sampleFlow(flow, e.pos.x, e.pos.y)) ?? norm({ x: tdx, y: tdy });
+      let skx = seek.x;
+      let sky = seek.y;
+      // Spitter keeps its distance: back off when the player gets inside standoff range.
+      if (e.type === 'spitter' && tdist < SPITTER_STANDOFF) {
+        skx = -skx;
+        sky = -sky;
+      }
+      const sep = separation(e, enemies);
+      const desired = norm({
+        x: skx * spd + sep.x * ENEMY_SEPARATION_FORCE,
+        y: sky * spd + sep.y * ENEMY_SEPARATION_FORCE,
+      });
+      e.vel = { x: desired.x * spd, y: desired.y * spd };
+      // Stalker charges a lunge and fires it when the gap is right.
+      if (e.type === 'stalker') {
+        e.cd = Math.max(0, (e.cd ?? STALKER_LUNGE_CD) - dt);
+        if (e.cd === 0 && tdist < STALKER_LUNGE_RANGE) {
+          e.lunge = STALKER_LUNGE_TIME;
+          e.cd = STALKER_LUNGE_CD;
+        }
+      }
+    }
 
     // Per-axis AABB wall collision (same model as the player).
     let nx = e.pos.x + e.vel.x * dt;
@@ -157,5 +199,36 @@ export function updateEnemies(
     const wy = hitWall(e.pos.x, ny, def.radius, walls);
     if (wy) ny = e.vel.y > 0 ? wy.y - def.radius : wy.y + wy.h + def.radius;
     e.pos.y = ny;
+  }
+}
+
+/** Spitters lob acid globs (hostile bullets) at a player in range with clear LOS. */
+export function updateRangedEnemies(state: GameState, dt: number): void {
+  const up = state.players.filter((p) => p.alive && !p.downed);
+  if (up.length === 0) return;
+  const solids = mapSolids(state);
+  for (const e of state.enemies) {
+    if (e.type !== 'spitter') continue;
+    e.cd = Math.max(0, (e.cd ?? SPITTER_FIRE_CD) - dt);
+    const tp = up.reduce((a, b) =>
+      (a.pos.x - e.pos.x) ** 2 + (a.pos.y - e.pos.y) ** 2 <= (b.pos.x - e.pos.x) ** 2 + (b.pos.y - e.pos.y) ** 2 ? a : b,
+    );
+    const dx = tp.pos.x - e.pos.x;
+    const dy = tp.pos.y - e.pos.y;
+    if (e.cd > 0 || dx * dx + dy * dy > SPITTER_RANGE * SPITTER_RANGE) continue;
+    if (!segmentClear(e.pos, tp.pos, solids)) continue;
+    const a = Math.atan2(dy, dx);
+    state.bullets.push({
+      id: state.nextBulletId++,
+      pos: { x: e.pos.x, y: e.pos.y },
+      vel: { x: Math.cos(a) * SPITTER_ACID_SPEED, y: Math.sin(a) * SPITTER_ACID_SPEED },
+      ttl: SPITTER_ACID_TTL,
+      damage: SPITTER_ACID_DMG,
+      splashRadius: 0,
+      splashDamage: 0,
+      hostile: true,
+      owner: -1,
+    });
+    e.cd = SPITTER_FIRE_CD;
   }
 }

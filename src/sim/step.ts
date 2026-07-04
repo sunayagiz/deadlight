@@ -2,7 +2,7 @@ import { updateBosses } from './bosses';
 import { updateCodTimers, updateInteractions, updatePowerups } from './cod';
 import { updateCombat } from './combat';
 import { updateRevives } from './coop';
-import { enemySpeedScale, updateEnemies } from './enemies';
+import { enemySpeedScale, updateEnemies, updateRangedEnemies } from './enemies';
 import { updateExtraction } from './extraction';
 import { getFlowField } from './flowfield';
 import { updateLoot } from './loot';
@@ -65,6 +65,7 @@ export function stepSim(
   updateInteractions(state, list, rng); // pay-doors + Mystery Box / PaP / wall / power
   updateRevives(state, list, dt); // bleedout + teammate revives
   updateEnemies(state.enemies, state.players, solids, dt, flow, enemySpeedScale(state.wave.index));
+  updateRangedEnemies(state, dt); // spitters lob acid
   updateBosses(state, dt, rng);
   updateBullets(state, dt);
   updateCombat(state, dt, rng);

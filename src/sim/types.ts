@@ -82,7 +82,16 @@ export interface LootState {
   ttl: number; // seconds before it despawns
 }
 
-export type EnemyType = 'shambler' | 'runner' | 'brute' | 'bloater' | 'screamer' | 'hound';
+export type EnemyType =
+  | 'shambler'
+  | 'runner'
+  | 'brute'
+  | 'bloater'
+  | 'screamer'
+  | 'hound'
+  | 'spitter' // ranged: keeps its distance and lobs acid
+  | 'boomer' // fast rusher that explodes on death
+  | 'stalker'; // lean lurker that periodically lunges
 
 /** A fixed buyable in the world (COD-style): doors, Mystery Box, Pack-a-Punch, wall guns, power. */
 export type InteractKind = 'mysterybox' | 'packapunch' | 'wallbuy' | 'power';
@@ -126,6 +135,8 @@ export interface EnemyState {
   hp: number;
   hitFlash: number; // seconds of hit-flash left — pure view hint, still part of sim state
   boss?: BossBrain; // present only on boss enemies
+  cd?: number; // generic ability cooldown — spitter acid shot / stalker lunge
+  lunge?: number; // stalker: seconds left in an active lunge (dash toward the player)
 }
 
 /** Axis-aligned solid rectangle. */
@@ -170,6 +181,7 @@ export interface WaveState {
   spawnQueue: EnemyType[]; // enemies still to spawn this wave
   spawnCooldown: number; // seconds until the next spawn
   killsThisWave: number;
+  spawnCursor: number; // round-robins the spawn across zones so they don't cluster
 }
 
 /** Serializable plain data — this is what will go over the wire in the netcode slice. */
