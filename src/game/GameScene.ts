@@ -29,6 +29,7 @@ import { createGameState } from '../sim/state';
 import { stepSim } from '../sim/step';
 import { recordScore } from './scores';
 import { affixTint, getSettings, powerupColor, scaledFlash, scaledShake, type Settings } from './settings';
+import { BED_BASE, bedVolume, lerpTo, tensionVolume } from './music';
 import { applyLoadout } from './loadouts';
 import { addCurrency, runReward } from './profile';
 import { lerp } from '../sim/vec';
@@ -125,6 +126,10 @@ const SOUNDS = [
   'shot', 'smg', 'shotgun', 'mg', 'minigun', 'rpglaunch',
   'explosion', 'squelch', 'whoosh', 'hurt', 'door', 'heartbeat',
   'growl', 'snarl', 'baby', 'knock', 'creak',
+  // B5 — dynamic music: a boss/dog-round stinger (one-shot) + the tension stem.
+  // `music_tension` is loaded here but driven as a persistent looping LAYER (see
+  // loadAudioDeferred / updateDynamicMusic), not fired via sfx().
+  'sting_boss', 'music_tension',
 ] as const;
 
 /** Per-weapon fire sound. */
@@ -230,6 +235,14 @@ export class GameScene extends Phaser.Scene {
   private prevMeleeSwing = 0;
   private prevDashLeft = 0;
   private heartbeat?: Phaser.Sound.BaseSound;
+  // B5 — dynamic music: a persistent `music_tension` layer created once (like the
+  // bed) and volume-driven per frame from state.intensity, plus the smoothed
+  // current volumes for both layers (lerped so nothing jumps).
+  private tensionMusic?: Phaser.Sound.BaseSound;
+  private tensionVol = 0; // smoothed tension-layer volume
+  private bedVol = BED_BASE; // smoothed base-bed volume
+  private prevDogRound = false; // rising-edge detect for the hellhound-round stinger
+  private stingerCd = 0; // shared cooldown so mood stingers can't spam
   private growlCd = 2;
   private ambientCd = 8;
   private minimapG!: Phaser.GameObjects.Graphics; // static part: walls/doors/fog
@@ -314,7 +327,16 @@ export class GameScene extends Phaser.Scene {
     this.load.audio('music', `${ASSET_BASE}assets/audio/music.wav`);
     const startMusic = () => {
       if (this.sound.locked || !this.cache.audio.exists('music') || this.sound.get('music')) return;
-      this.sound.play('music', { loop: true, volume: 0.35 });
+      this.sound.play('music', { loop: true, volume: BED_BASE });
+      // B5 — start the tension LAYER looping in sync with the bed, silent to begin
+      // (near-0 intensity), then faded up per frame by updateDynamicMusic. Created
+      // once and kept persistent (guarded like the bed so it never double-starts).
+      if (this.cache.audio.exists('music_tension') && !this.sound.get('music_tension')) {
+        this.tensionMusic = this.sound.add('music_tension', { loop: true, volume: 0 });
+        this.tensionMusic.play();
+        this.tensionVol = 0;
+        this.bedVol = BED_BASE;
+      }
     };
     this.load.once(Phaser.Loader.Events.COMPLETE, startMusic);
     this.sound.once(Phaser.Sound.Events.UNLOCKED, startMusic);
@@ -597,6 +619,16 @@ export class GameScene extends Phaser.Scene {
     // R restarts after death.
     this.input.keyboard!.on('keydown-R', () => {
       if (this.state.gameOver) this.scene.restart();
+    });
+
+    // B5 — clean up the persistent tension layer on scene shutdown/restart so it
+    // never leaks a second looping instance (startMusic recreates it next create()).
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      if (this.tensionMusic) {
+        this.tensionMusic.stop();
+        this.tensionMusic.destroy();
+        this.tensionMusic = undefined;
+      }
     });
 
     // Shop/perk clicks: hit-test the pointer in SCREEN space ourselves. Phaser's
@@ -1142,6 +1174,40 @@ export class GameScene extends Phaser.Scene {
     this.renderState(this.role === 'guest' ? 1 : alpha, dt);
   }
 
+  /**
+   * B5 — fire a one-shot mood stinger, deduped by a shared cooldown so a burst of
+   * transitions (e.g. two bosses at once) can't stack stingers into a wall of noise.
+   * Guarded by `cache.audio.exists` via sfx(); never plays before the audio loads.
+   */
+  private stinger(key: (typeof SOUNDS)[number], volume: number, rate = 1): void {
+    if (this.stingerCd > 0) return;
+    this.sfx(key, volume, rate);
+    this.stingerCd = 1.6; // s until another mood stinger may play
+  }
+
+  /**
+   * B5 — client-side dynamic soundtrack. Reads the already-serialized AI-Director
+   * `state.intensity` (0..1) locally and drives the persistent `music_tension`
+   * layer's volume (silent when calm → up to a capped max at peak), smoothly
+   * lerped each frame so nothing jumps. The base bed swells slightly at the top
+   * end. Ducks the tension layer under the near-death heartbeat so the two don't
+   * pile up. Pure math lives in ./music (unit-tested); this only applies it.
+   */
+  private updateDynamicMusic(dt: number): void {
+    if (!this.tensionMusic) this.tensionMusic = this.sound.get('music_tension') ?? undefined;
+    const intensity = Math.max(0, Math.min(1, this.state.intensity ?? 0));
+    let tensionTarget = tensionVolume(intensity);
+    if (this.heartbeat) tensionTarget *= 0.6; // duck under the heartbeat when near death
+    const bedTarget = bedVolume(intensity);
+    // Frame-rate-independent ease toward the targets (~0.7 s settle — musical, no pops).
+    this.tensionVol = lerpTo(this.tensionVol, tensionTarget, dt, 0.7);
+    this.bedVol = lerpTo(this.bedVol, bedTarget, dt, 0.7);
+    const tension = this.tensionMusic as (Phaser.Sound.BaseSound & { setVolume?: (v: number) => void }) | undefined;
+    if (tension && tension.isPlaying && tension.setVolume) tension.setVolume(this.tensionVol);
+    const bed = this.sound.get('music') as (Phaser.Sound.BaseSound & { setVolume?: (v: number) => void }) | null;
+    if (bed && bed.isPlaying && bed.setVolume) bed.setVolume(this.bedVol);
+  }
+
   /** Sound + feedback triggers derived from sim-state transitions (local player). */
   private gameFeelEvents(dt: number): void {
     const p = this.local();
@@ -1196,13 +1262,26 @@ export class GameScene extends Phaser.Scene {
       this.prevWavePhase = phase;
     }
 
-    // boss spawn → caption (rising edge on the live boss count)
+    // B5 — mood stingers: shared cooldown ticks down so bursts can't spam.
+    this.stingerCd = Math.max(0, this.stingerCd - dt);
+
+    // boss spawn → caption + boss sting (rising edge on the live boss count)
     const bossCount = this.state.enemies.reduce((n, e) => (e.boss ? n + 1 : n), 0);
     if (bossCount > this.prevBossCount) {
       const b = this.state.enemies.find((e) => e.boss);
       this.caption(b ? `[${ZOMBIES[b.type].name.toUpperCase()} INCOMING]` : '[boss incoming]');
+      this.stinger('sting_boss', 0.6); // dread hit under the boss bar reveal
     }
     this.prevBossCount = bossCount;
+
+    // hellhound round begins → a rising snarl-driven stinger (ties to the HELLHOUNDS notice)
+    if (this.state.dogRound && !this.prevDogRound) {
+      this.stinger('snarl', 0.7, 0.7); // pitched down = a rising, ominous swell distinct from a live snarl
+    }
+    this.prevDogRound = this.state.dogRound;
+
+    // B5 — reactive soundtrack mix (client-side, from the serialized Director intensity)
+    this.updateDynamicMusic(dt);
 
     // doors opening → creak + minimap update
     const open = this.state.doors.filter((d) => d.open).length;
