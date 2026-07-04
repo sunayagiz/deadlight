@@ -88,6 +88,8 @@ export function createGameState(
     notice: '',
     noticeT: 0,
     boxReveal: null,
+    deployables: [],
+    nextDeployableId: 1,
   };
 }
 
@@ -108,5 +110,6 @@ export function emptyInput(): PlayerInput {
     banish: -1,
     use: false,
     ping: null,
+    place: null,
   };
 }

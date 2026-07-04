@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import type { PlayerInput } from '../sim/types';
+import type { DeployableKind, PlayerInput } from '../sim/types';
 
 interface Keys {
   W: Phaser.Input.Keyboard.Key;
@@ -11,6 +11,9 @@ interface Keys {
   F: Phaser.Input.Keyboard.Key; // interact / buy
 }
 
+// A7 build-bar cycle: B steps barricade → trap → off.
+const BUILD_KINDS: DeployableKind[] = ['barricade', 'trap'];
+
 /** The only place that touches raw keyboard/mouse. Everything downstream sees PlayerInput. */
 export class InputCollector {
   private keys: Keys;
@@ -21,6 +24,8 @@ export class InputCollector {
   private pendingReroll = false; // draft reroll requested by the HUD since the last sample
   private pendingBanish = -1; // draft option to banish requested by the HUD since the last sample
   private pendingPing = false; // co-op ping requested (Z / middle-mouse) since the last sample
+  private buildIndex = -1; // A7 build mode: -1 = off, else index into BUILD_KINDS
+  private pendingPlace: { x: number; y: number; kind: DeployableKind } | null = null; // build click since the last sample
 
   constructor(private scene: Phaser.Scene) {
     this.keys = scene.input.keyboard!.addKeys('W,A,S,D,SPACE,SHIFT,F') as Keys;
@@ -31,14 +36,24 @@ export class InputCollector {
       else if (ev.key === 'q' || ev.key === 'Q') this.pendingCycle = -1;
       else if (ev.key === 'e' || ev.key === 'E') this.pendingCycle = 1;
       else if (ev.key === 'z' || ev.key === 'Z') this.pendingPing = true; // ping at the cursor
+      else if (ev.key === 'b' || ev.key === 'B') this.buildIndex = this.buildIndex >= BUILD_KINDS.length - 1 ? -1 : this.buildIndex + 1; // cycle the build bar
     });
     scene.input.on('wheel', (_p: unknown, _o: unknown, _dx: number, dy: number) => {
       this.pendingCycle = dy > 0 ? 1 : -1;
     });
-    // Middle-mouse also pings (Apex muscle memory). button 1 = middle.
     scene.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
-      if (p.button === 1) this.pendingPing = true;
+      if (p.button === 1) this.pendingPing = true; // middle-mouse also pings (Apex muscle memory)
+      else if (p.button === 0 && this.buildIndex >= 0) {
+        // left-click in build mode places at the aim world point (never fires the weapon)
+        const world = this.scene.cameras.main.getWorldPoint(p.x, p.y);
+        this.pendingPlace = { x: world.x, y: world.y, kind: BUILD_KINDS[this.buildIndex] };
+      }
     });
+  }
+
+  /** A7 — the deployable currently selected in the build bar, or null when not building (drives the preview + fire suppression). */
+  buildKind(): DeployableKind | null {
+    return this.buildIndex >= 0 ? BUILD_KINDS[this.buildIndex] : null;
   }
 
   /** HUD hooks: queue a shop purchase / perk pick to fold into the next input tick. */
@@ -65,6 +80,8 @@ export class InputCollector {
     const reroll = this.pendingReroll;
     const banish = this.pendingBanish;
     const ping = this.pendingPing ? { x: world.x, y: world.y } : null; // ping the current aim point
+    const place = this.pendingPlace;
+    const building = this.buildIndex >= 0;
     this.pendingSlot = -1;
     this.pendingCycle = 0;
     this.pendingBuy = -1;
@@ -72,12 +89,13 @@ export class InputCollector {
     this.pendingReroll = false;
     this.pendingBanish = -1;
     this.pendingPing = false;
+    this.pendingPlace = null;
     return {
       moveX: (this.keys.D.isDown ? 1 : 0) - (this.keys.A.isDown ? 1 : 0),
       moveY: (this.keys.S.isDown ? 1 : 0) - (this.keys.W.isDown ? 1 : 0),
       aimWorldX: world.x,
       aimWorldY: world.y,
-      fire: pointer.isDown,
+      fire: building ? false : pointer.isDown, // building steals the left click for placement
       dash: Phaser.Input.Keyboard.JustDown(this.keys.SPACE),
       sprint: this.keys.SHIFT.isDown,
       weaponSlot: slot,
@@ -88,6 +106,7 @@ export class InputCollector {
       banish,
       use: Phaser.Input.Keyboard.JustDown(this.keys.F),
       ping,
+      place,
     };
   }
 }

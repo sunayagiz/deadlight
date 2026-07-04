@@ -1,4 +1,4 @@
-import { DOOR_OPEN_RADIUS } from '../config';
+import { BARRICADE_SIZE, DOOR_OPEN_RADIUS } from '../config';
 import type { Door, GameState, Interactable, SpawnZone, Wall } from './types';
 
 export interface MapDef {
@@ -183,11 +183,22 @@ function buildInteractables(): Interactable[] {
   ];
 }
 
-/** Rects that currently block movement, bullets and sight: all walls + still-closed doors. */
+/**
+ * Rects that currently block movement, bullets and sight: all walls + still-closed
+ * doors + every alive barricade (A7). Because movement, the flow field and LOS all
+ * read this list, a placed barricade automatically reroutes enemies AROUND it and
+ * stops players/bullets — no extra wiring needed anywhere else.
+ */
 export function mapSolids(state: GameState): Wall[] {
   const solids: Wall[] = state.walls.slice();
   for (const d of state.doors) {
     if (!d.open) solids.push({ x: d.x, y: d.y, w: d.w, h: d.h });
+  }
+  const half = BARRICADE_SIZE / 2;
+  for (const dp of state.deployables) {
+    if (dp.kind === 'barricade' && (dp.hp ?? 0) > 0) {
+      solids.push({ x: dp.x - half, y: dp.y - half, w: BARRICADE_SIZE, h: BARRICADE_SIZE });
+    }
   }
   return solids;
 }

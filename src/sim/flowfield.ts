@@ -138,7 +138,9 @@ export function getFlowField(state: GameState, solids: Wall[]): FlowField {
   // sources = every standing player; enemies flow toward whichever is nearest by path
   const up = state.players.filter((p) => p.alive && !p.downed);
   const sources = (up.length > 0 ? up : state.players).map((p) => p.pos);
-  const key = `${sources.map((s) => `${Math.floor(s.x / FLOW_CELL)},${Math.floor(s.y / FLOW_CELL)}`).join(';')}|${state.doors.map((d) => (d.open ? 1 : 0)).join('')}|${state.mapW}x${state.mapH}`;
+  // include a barricade signature so placing/destroying one (A7) reroutes the horde
+  const bar = state.deployables.map((d) => (d.kind === 'barricade' && (d.hp ?? 0) > 0 ? `${d.id}` : '')).join('');
+  const key = `${sources.map((s) => `${Math.floor(s.x / FLOW_CELL)},${Math.floor(s.y / FLOW_CELL)}`).join(';')}|${state.doors.map((d) => (d.open ? 1 : 0)).join('')}|${bar}|${state.mapW}x${state.mapH}`;
   if (key !== cacheKey || !cacheField) {
     cacheField = computeFlowField(state.mapW, state.mapH, solids, sources);
     cacheKey = key;

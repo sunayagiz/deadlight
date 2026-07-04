@@ -161,6 +161,19 @@ export const DOG_ROUND_FIRST = 5; // earliest wave a hellhound round can occur
 export const DOG_ROUND_EVERY = 5; // roughly every Nth wave after that
 export const NOTICE_TIME = 2.6; // seconds an announcer line stays on screen
 
+// --- A7: buildable barricades + placeable traps (spend points on space control) ---
+export const BARRICADE_SIZE = 46; // px: side of the square barricade footprint (its solid AABB)
+export const BARRICADE_HP = 500; // structure hp; enemies chew this down at their contactDamage
+export const BARRICADE_ATTACK_REACH = 8; // px past the enemy radius at which it can claw an adjacent barricade
+export const COST_BARRICADE = 500; // COD points to raise a barricade
+export const COST_TRAP = 750; // COD points to arm an electric-floor trap
+export const MAX_BARRICADES = 6; // per-squad cap (anti-spam)
+export const MAX_TRAPS = 4; // per-squad cap (anti-spam)
+export const TRAP_RADIUS = 90; // px: electric-floor zap radius
+export const TRAP_DAMAGE = 120; // damage per pulse to every enemy in the zone (bosses take half)
+export const TRAP_PULSE_CD = 0.6; // s between zaps — permanent-with-cooldown model (no charges/expiry)
+export const DEPLOY_PLACE_RANGE = 220; // px: a deployable must be placed within this of the player
+
 // --- Endless survival ---
 // No win condition: waves continue forever, each round harder. The old extraction
 // exit is pushed out of reach (9999) so the run only ends when the squad falls.

@@ -20,6 +20,26 @@ export interface PlayerInput {
   banish: number; // banish draft option i (0..PERK_CHOICES-1) from the run's pool; -1 = none
   use: boolean; // interact with the nearest buyable (door/box/PaP/wall/power) this tick
   ping: { x: number; y: number } | null; // world point the player pinged this tick; null = no ping
+  place: { x: number; y: number; kind: DeployableKind } | null; // A7: request to build a deployable at a world point; null = none
+}
+
+/** A7 — buildable defence the squad spends points to place (host-authoritative). */
+export type DeployableKind = 'barricade' | 'trap';
+
+/**
+ * A placed deployable. A barricade is SOLID (folds into mapSolids, so pathing /
+ * bullets / LOS all route around it) and has `hp` enemies chew through. A trap is
+ * an armed electric floor zone (not solid) that pulses damage on a `cd`.
+ * Host-authoritative and serialized so every client renders it.
+ */
+export interface Deployable {
+  id: number;
+  kind: DeployableKind;
+  x: number;
+  y: number;
+  hp?: number; // barricade: structure left (removed at 0)
+  cd?: number; // trap: seconds until it can zap again
+  owner: number; // player slot that placed it
 }
 
 /** Apex-style ping kind — auto-chosen by the host from what's near the ping point. */
@@ -272,4 +292,7 @@ export interface GameState {
   notice: string; // transient announcer line ("MAX AMMO", "POWER ON", …)
   noticeT: number; // seconds the notice stays up
   boxReveal: { weapon: WeaponId; t: number } | null; // Mystery Box spin animation
+  // ── A7: buildable defences ──
+  deployables: Deployable[]; // placed barricades + traps (host-authoritative, serialized)
+  nextDeployableId: number;
 }

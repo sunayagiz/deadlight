@@ -1,6 +1,7 @@
 import { updateBosses } from './bosses';
 import { updateCodTimers, updateInteractions, updatePowerups } from './cod';
 import { updateCombat } from './combat';
+import { placeDeployables, updateBarricadeAttacks, updateTraps } from './deployables';
 import { updateDirector } from './director';
 import { updateRevives } from './coop';
 import { enemySpeedScale, updateEnemies, updateRangedEnemies } from './enemies';
@@ -74,10 +75,13 @@ export function stepSim(
   });
 
   updateInteractions(state, list, rng); // pay-doors + Mystery Box / PaP / wall / power
+  placeDeployables(state, list); // A7: fold build actions into new barricades / traps
   updatePings(state, list, dt); // co-op pings: age out + fold this tick's ping actions in
   updateRevives(state, list, dt); // bleedout + teammate revives
   updateEnemies(state.enemies, state.players, solids, dt, flow, enemySpeedScale(state.wave.index));
   updateRangedEnemies(state, dt); // spitters lob acid
+  updateTraps(state, dt); // A7: electric-floor traps zap enemies in range (before combat clears the dead → trap kills pay out)
+  updateBarricadeAttacks(state, dt); // A7: enemies chew barricades they're blocked by; destroyed ones are removed
   updateBosses(state, dt, rng);
   updateBullets(state, dt);
   updateCombat(state, dt, rng);

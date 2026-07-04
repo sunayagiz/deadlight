@@ -2,6 +2,10 @@ import Phaser from 'phaser';
 import {
   AMBIENT_RADIUS,
   BANISH_COST,
+  BARRICADE_HP,
+  BARRICADE_SIZE,
+  COST_BARRICADE,
+  COST_TRAP,
   EXTRACT_HOLD,
   EXTRACT_RADIUS,
   EXTRACTION_WAVE,
@@ -11,9 +15,11 @@ import {
   PLAYER_MAX_HP,
   PLAYER_RADIUS,
   SIM_DT,
+  TRAP_RADIUS,
 } from '../config';
 import { AFFIXES, affixExplodesOnDeath } from '../sim/affix';
 import { evolutionReady, interactCost, interactReady, nearestBuyable } from '../sim/cod';
+import { canPlaceDeployable, deployCost } from '../sim/deployables';
 import { ZOMBIES, spawnEnemy } from '../sim/enemies';
 import { buildMap, mapSolids } from '../sim/map';
 import { PERKS, effectiveMaxHp, rerollCost, type PerkId } from '../sim/perks';
@@ -256,6 +262,14 @@ export class GameScene extends Phaser.Scene {
   private pingNodes = new Map<number, { chevron: Phaser.GameObjects.Triangle; dot: Phaser.GameObjects.Arc; label: Phaser.GameObjects.Text }>();
   private teammateHud = new Map<number, { back: Phaser.GameObjects.Rectangle; fill: Phaser.GameObjects.Rectangle; name: Phaser.GameObjects.Text }>();
   private threatArrows = new Map<number, Phaser.GameObjects.Triangle>();
+  // A7 deployables: pooled barricade bodies (+ hp bars) and pulsing trap rings, plus a build bar + placement preview
+  private barricadeSprites = new Map<number, Phaser.GameObjects.Image>();
+  private barricadeBars = new Map<number, { back: Phaser.GameObjects.Rectangle; fill: Phaser.GameObjects.Rectangle }>();
+  private trapRings = new Map<number, { ring: Phaser.GameObjects.Arc; core: Phaser.GameObjects.Arc }>();
+  private prevTrapCd = new Map<number, number>(); // detect the zap edge (cd jumps up) to flash the ring
+  private buildBar!: Phaser.GameObjects.Text; // screen-space "[B] BARRICADE $500" bar
+  private buildPreviewBox!: Phaser.GameObjects.Rectangle; // barricade footprint preview at the aim point
+  private buildPreviewRing!: Phaser.GameObjects.Arc; // trap radius preview at the aim point
 
   constructor() {
     super('game');
@@ -517,6 +531,7 @@ export class GameScene extends Phaser.Scene {
     this.buildShopUI();
     this.buildDraftUI();
     this.buildCodRender();
+    this.buildDeployUI();
 
     // All sound (SFX + music) loads in the background now that the scene is up.
     this.loadAudioDeferred();
@@ -693,6 +708,117 @@ export class GameScene extends Phaser.Scene {
     this.codStatus = this.add
       .text(228, 16, '', { fontFamily: 'monospace', fontSize: '13px', color: '#8affbf', fontStyle: 'bold' })
       .setScrollFactor(0).setDepth(DEPTH_HUD);
+  }
+
+  // ── A7 build bar + placement preview ────────────────────────────────────────
+  private buildDeployUI(): void {
+    // screen-space build bar (bottom-centre); shown only while a build kind is selected
+    this.buildBar = this.add
+      .text(480, 452, '', { fontFamily: 'monospace', fontSize: '14px', color: '#ffe08a', fontStyle: 'bold', backgroundColor: '#000a', align: 'center' })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(DEPTH_HUD + 1)
+      .setPadding(8, 5, 8, 5)
+      .setVisible(false);
+    // world-space translucent previews (one for each kind); coloured by validity
+    this.buildPreviewBox = this.add
+      .rectangle(0, 0, BARRICADE_SIZE, BARRICADE_SIZE, 0x8a5a2a, 0.35)
+      .setStrokeStyle(2, 0xffcf7a, 0.9)
+      .setDepth(DEPTH_HUD - 3)
+      .setVisible(false);
+    this.buildPreviewRing = this.add
+      .circle(0, 0, TRAP_RADIUS, 0x4ec6ff, 0.14)
+      .setStrokeStyle(2, 0x8affff, 0.9)
+      .setDepth(DEPTH_HUD - 3)
+      .setVisible(false);
+  }
+
+  /**
+   * A7 — render placed barricades (a scrap-plank box reusing the `crate` texture,
+   * tinted redder as it takes damage, with a slim HP bar) and traps (a pulsing
+   * electric ring that flashes on each zap). Then the build bar + a placement
+   * preview at the aim point that turns red when placement is invalid.
+   */
+  private updateDeployRender(): void {
+    const s = this.state;
+    const t = s.time;
+    const seenBar = new Set<number>();
+    const seenTrap = new Set<number>();
+    for (const d of s.deployables) {
+      if (d.kind === 'barricade') {
+        seenBar.add(d.id);
+        const frac = Math.max(0, Math.min(1, (d.hp ?? 0) / BARRICADE_HP));
+        let img = this.barricadeSprites.get(d.id);
+        if (!img) {
+          img = this.add.image(d.x, d.y, 'crate').setDepth(DEPTH_FLOOR + 0.6);
+          this.setSpriteHeight(img, BARRICADE_SIZE);
+          img.setDisplaySize(BARRICADE_SIZE, BARRICADE_SIZE);
+          this.barricadeSprites.set(d.id, img);
+        }
+        // healthy = pale timber, battered = charred red
+        const dmg = 1 - frac;
+        const r = 0xff, g = Math.round(0xff - dmg * 0xc0), b = Math.round(0xff - dmg * 0xe0);
+        img.setPosition(d.x, d.y).setTint((r << 16) | (g << 8) | b);
+        let bar = this.barricadeBars.get(d.id);
+        if (!bar) {
+          const back = this.add.rectangle(d.x, d.y - BARRICADE_SIZE / 2 - 6, BARRICADE_SIZE, 4, 0x1a0505, 0.85).setDepth(DEPTH_HUD - 5);
+          const fill = this.add.rectangle(d.x - BARRICADE_SIZE / 2, d.y - BARRICADE_SIZE / 2 - 6, BARRICADE_SIZE, 4, 0x4bd06a, 1).setOrigin(0, 0.5).setDepth(DEPTH_HUD - 5);
+          bar = { back, fill };
+          this.barricadeBars.set(d.id, bar);
+        }
+        bar.back.setPosition(d.x, d.y - BARRICADE_SIZE / 2 - 6);
+        bar.fill.setPosition(d.x - BARRICADE_SIZE / 2, d.y - BARRICADE_SIZE / 2 - 6);
+        bar.fill.width = BARRICADE_SIZE * frac;
+        bar.fill.setFillStyle(frac < 0.3 ? 0xc23b3b : frac < 0.6 ? 0xe0b040 : 0x4bd06a);
+      } else {
+        seenTrap.add(d.id);
+        const prev = this.prevTrapCd.get(d.id) ?? 0;
+        const zapped = (d.cd ?? 0) > prev + 0.001; // cd jumped up → it just fired
+        this.prevTrapCd.set(d.id, d.cd ?? 0);
+        let node = this.trapRings.get(d.id);
+        if (!node) {
+          const ring = this.add.circle(d.x, d.y, TRAP_RADIUS, 0x4ec6ff, 0.08).setStrokeStyle(2, 0x8affff, 0.7).setDepth(DEPTH_FLOOR + 0.55);
+          const core = this.add.circle(d.x, d.y, 10, 0x8affff, 0.9).setDepth(DEPTH_FLOOR + 0.56);
+          node = { ring, core };
+          this.trapRings.set(d.id, node);
+        }
+        const pulse = 0.5 + 0.5 * Math.sin(t * 6 + d.id);
+        const flash = zapped ? 0.5 : 0;
+        node.ring.setPosition(d.x, d.y).setFillStyle(0x4ec6ff, 0.06 + 0.08 * pulse + flash).setStrokeStyle(2, 0x8affff, 0.55 + 0.35 * pulse + flash);
+        node.core.setPosition(d.x, d.y).setScale(0.8 + 0.4 * pulse + (zapped ? 0.6 : 0)).setFillStyle(0x8affff, 0.75 + 0.25 * pulse);
+        if (zapped) this.sfx('shot', 0.28, 1.8); // sharp electric crack on each zap
+      }
+    }
+    for (const [id, img] of this.barricadeSprites) if (!seenBar.has(id)) (img.destroy(), this.barricadeSprites.delete(id));
+    for (const [id, bar] of this.barricadeBars) if (!seenBar.has(id)) (bar.back.destroy(), bar.fill.destroy(), this.barricadeBars.delete(id));
+    for (const [id, n] of this.trapRings) if (!seenTrap.has(id)) (n.ring.destroy(), n.core.destroy(), this.trapRings.delete(id), this.prevTrapCd.delete(id));
+
+    // build bar + placement preview at the aim point (local player)
+    const kind = this.inputCollector.buildKind();
+    if (kind) {
+      const lp = this.local();
+      const ptr = this.input.activePointer;
+      const world = this.cameras.main.getWorldPoint(ptr.x, ptr.y);
+      const valid = canPlaceDeployable(s, lp, world.x, world.y, kind);
+      this.buildBar
+        .setText(`BUILD: ${kind.toUpperCase()}  $${deployCost(kind)}     [B] cycle / off   ·   click to place`)
+        .setVisible(true)
+        .setColor(s.cash >= deployCost(kind) ? '#ffe08a' : '#c07a6a');
+      const okC = kind === 'barricade' ? 0xffcf7a : 0x8affff;
+      if (kind === 'barricade') {
+        this.buildPreviewBox.setPosition(world.x, world.y).setVisible(true)
+          .setFillStyle(valid ? 0x8a5a2a : 0x8a1414, 0.35).setStrokeStyle(2, valid ? okC : 0xff4a4a, 0.95);
+        this.buildPreviewRing.setVisible(false);
+      } else {
+        this.buildPreviewRing.setPosition(world.x, world.y).setVisible(true)
+          .setFillStyle(valid ? 0x4ec6ff : 0x8a1414, 0.14).setStrokeStyle(2, valid ? okC : 0xff4a4a, 0.95);
+        this.buildPreviewBox.setVisible(false);
+      }
+    } else {
+      this.buildBar.setVisible(false);
+      this.buildPreviewBox.setVisible(false);
+      this.buildPreviewRing.setVisible(false);
+    }
   }
 
   private nearestPayDoor(p: PlayerState): Door | null {
@@ -1564,6 +1690,7 @@ export class GameScene extends Phaser.Scene {
     this.updateDraftUI();
     this.updateExtractionHud(dt);
     this.updateCodRender();
+    this.updateDeployRender(); // A7: barricades (+hp bars), traps, build bar + placement preview
     this.syncPings(); // world-space co-op ping markers
     this.updateThreatArrows(); // screen-edge arrows toward off-screen bosses/hounds
 

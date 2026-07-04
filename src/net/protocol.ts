@@ -1,5 +1,6 @@
 import type {
   BulletState,
+  Deployable,
   EnemyState,
   ExtractionState,
   GameState,
@@ -51,6 +52,8 @@ export interface Snapshot {
   noticeT: number;
   boxR: { weapon: WeaponId; t: number } | null;
   int: number; // AI Director intensity 0..1 (B5 dynamic music reads it client-side)
+  dep: Deployable[]; // A7: placed barricades + traps (all clients render them)
+  ndep: number; // nextDeployableId
 }
 
 export function snapshot(s: GameState): Snapshot {
@@ -88,6 +91,8 @@ export function snapshot(s: GameState): Snapshot {
     noticeT: s.noticeT,
     boxR: s.boxReveal,
     int: s.intensity,
+    dep: s.deployables,
+    ndep: s.nextDeployableId,
   };
 }
 
@@ -129,6 +134,8 @@ export function applySnapshot(s: GameState, snap: Snapshot): void {
   s.noticeT = snap.noticeT;
   s.boxReveal = snap.boxR;
   s.intensity = snap.int;
+  s.deployables = snap.dep;
+  s.nextDeployableId = snap.ndep;
 }
 
 // Wire messages
