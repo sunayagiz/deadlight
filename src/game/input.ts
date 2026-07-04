@@ -9,6 +9,7 @@ interface Keys {
   SPACE: Phaser.Input.Keyboard.Key;
   SHIFT: Phaser.Input.Keyboard.Key;
   F: Phaser.Input.Keyboard.Key; // interact / buy
+  X: Phaser.Input.Keyboard.Key; // A9: trigger Zed-Time (when the meter is full)
 }
 
 // A7 build-bar cycle: B steps barricade → trap → off.
@@ -28,7 +29,7 @@ export class InputCollector {
   private pendingPlace: { x: number; y: number; kind: DeployableKind } | null = null; // build click since the last sample
 
   constructor(private scene: Phaser.Scene) {
-    this.keys = scene.input.keyboard!.addKeys('W,A,S,D,SPACE,SHIFT,F') as Keys;
+    this.keys = scene.input.keyboard!.addKeys('W,A,S,D,SPACE,SHIFT,F,X') as Keys;
     // Weapon switching is captured here as edge events, then folded into the
     // per-tick PlayerInput so it travels over the network like everything else.
     scene.input.keyboard!.on('keydown', (ev: KeyboardEvent) => {
@@ -105,6 +106,7 @@ export class InputCollector {
       reroll,
       banish,
       use: Phaser.Input.Keyboard.JustDown(this.keys.F),
+      ability: Phaser.Input.Keyboard.JustDown(this.keys.X), // A9: pop Zed-Time (edge-triggered)
       ping,
       place,
     };

@@ -197,6 +197,11 @@ export class GameScene extends Phaser.Scene {
   private hurtOverlay!: Phaser.GameObjects.Rectangle;
   private downOverlay!: Phaser.GameObjects.Rectangle; // desaturating vignette while the local player is downed
   private downedHud!: Phaser.GameObjects.Text; // centered "GET UP" / self-revive prompt when downed
+  private zedOverlay!: Phaser.GameObjects.Rectangle; // A9: cool-blue vignette while Zed-Time is active
+  private zedMeterBack!: Phaser.GameObjects.Rectangle; // A9: charge-meter track
+  private zedMeterFill!: Phaser.GameObjects.Rectangle; // A9: charge-meter fill
+  private zedMeterLabel!: Phaser.GameObjects.Text; // A9: "ZED n%" / "[X] READY" / countdown
+  private prevZedActive = false; // A9: rising-edge detect to pop the activation flash
   private prevHp = 0;
   private prevWavePhase = '';
   private prevOpenDoors = 0;
@@ -511,6 +516,19 @@ export class GameScene extends Phaser.Scene {
       .setScrollFactor(0)
       .setDepth(DEPTH_HUD)
       .setVisible(false);
+    // A9: Zed-Time — a cool-blue slow-mo vignette (reuses the hurt-vignette pattern)
+    // plus a charge meter under the HP bar that glows [X] READY when full.
+    this.zedOverlay = this.add
+      .rectangle(480, 270, 960, 540, 0x2b6bff, 0)
+      .setScrollFactor(0)
+      .setDepth(DEPTH_HUD - 1);
+    this.zedMeterBack = this.add.rectangle(16, 454, 200, 7, 0x0a1626).setOrigin(0, 0).setScrollFactor(0).setDepth(DEPTH_HUD);
+    this.zedMeterFill = this.add.rectangle(16, 454, 0, 7, 0x2b6bff).setOrigin(0, 0).setScrollFactor(0).setDepth(DEPTH_HUD);
+    this.zedMeterLabel = this.add
+      .text(16, 440, '', { fontFamily: 'monospace', fontSize: '11px', color: '#6f9fd0', fontStyle: 'bold' })
+      .setScrollFactor(0)
+      .setDepth(DEPTH_HUD);
+
     this.prevHp = this.local().hp;
     this.prevWavePhase = this.state.wave.phase;
 
@@ -1039,6 +1057,17 @@ export class GameScene extends Phaser.Scene {
     this.prevHp = p.hp;
     this.hurtFx = Math.max(0, this.hurtFx - dt * 2.0);
     this.hurtOverlay.setFillStyle(0xff1414, this.hurtFx * 0.5); // bright red, readable
+
+    // A9: Zed-Time — cool-blue slow-mo vignette + a one-shot pop on activation.
+    const zedActive = this.state.zedTime > 0;
+    if (zedActive && !this.prevZedActive) {
+      this.cameras.main.flash(180, 30, 90, 200); // cool blue pop
+      this.sfx('whoosh', 0.6, 0.7); // deep, pitched-down time-dilation whoosh
+      this.lightPulses.push({ x: p.pos.x, y: p.pos.y, life: 0.45, max: 0.45, size: 340 }); // radial shockwave
+    }
+    this.prevZedActive = zedActive;
+    const zedA = zedActive ? 0.13 + 0.05 * Math.sin(this.state.time * 8) : 0; // subtle breathing tint
+    this.zedOverlay.setFillStyle(0x2b6bff, zedA);
 
     // heartbeat when near death
     const dying = p.hp > 0 && p.hp < 30 && !this.state.gameOver;
@@ -1635,6 +1664,23 @@ export class GameScene extends Phaser.Scene {
     );
 
     this.hpFill.width = 200 * Math.max(0, lp.hp / PLAYER_MAX_HP);
+    // A9: Zed-Time charge meter — fills with kills, glows [X] READY when full,
+    // and shows the live countdown while the slow-mo window is running.
+    const zc = Math.max(0, Math.min(1, this.state.zedCharge));
+    if (this.state.zedTime > 0) {
+      this.zedMeterFill.width = 200;
+      this.zedMeterFill.setFillStyle(0x8affff);
+      this.zedMeterLabel.setText(`ZED-TIME ${this.state.zedTime.toFixed(1)}s`).setColor('#8affff').setAlpha(1);
+    } else if (zc >= 1) {
+      const glow = 0.55 + 0.45 * Math.sin(this.state.time * 6);
+      this.zedMeterFill.width = 200;
+      this.zedMeterFill.setFillStyle(0x6fd0ff);
+      this.zedMeterLabel.setText('ZED-TIME  [X] READY').setColor('#bfe8ff').setAlpha(glow);
+    } else {
+      this.zedMeterFill.width = 200 * zc;
+      this.zedMeterFill.setFillStyle(0x2b6bff);
+      this.zedMeterLabel.setText(`ZED ${Math.floor(zc * 100)}%`).setColor('#6f9fd0').setAlpha(1);
+    }
     const w = this.state.wave;
     const status = w.phase === 'intermission' ? `next in ${Math.ceil(w.timer)}s` : `${this.state.enemies.length} left`;
     const squad = this.state.players.filter((q) => q.alive).length;

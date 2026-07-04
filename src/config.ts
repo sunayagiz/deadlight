@@ -181,6 +181,20 @@ export const EXTRACTION_WAVE = 9999; // effectively unreachable → endless mode
 export const EXTRACT_HOLD = 14; // s a standing player must hold the extraction point
 export const EXTRACT_RADIUS = 110; // px radius of the extraction zone
 
+// --- A9: Zed-Time field ability (Killing-Floor-style shared slow-mo) ---
+// A chargeable power spike: fill the meter with kills, trigger it, and every
+// ENEMY (and their projectiles) crawls at ZED_TIMESCALE while the squad stays
+// full speed — a co-op moment to make plays. Lives in serialized GameState so
+// the host's sim slows every client identically. All timing is dt-driven (the
+// window counts down in REAL time), no wall-clock, so seeded runs reproduce.
+export const ZED_DURATION = 5; // s the slow-mo window lasts once triggered (real time)
+export const ZED_TIMESCALE = 0.4; // enemies + hostile projectiles run at 40% speed while active
+export const ZED_CHARGE_PER_KILL = 0.05; // meter fill per kill (0..1) → ~20 kills to charge fully
+// Gentle bleed on PARTIAL progress only (a full, banked meter never drains, so an
+// activation is always honoured and a hard-earned charge can be held for the right
+// moment). Partial charge bleeds so it can't be trickled up over a long lull.
+export const ZED_DRAIN_PER_SEC = 0.01; // 0 = never drains; here a half-full meter empties in ~50 s
+
 // --- Economy (between-wave shop) ---
 export const CASH_PER_KILL = 7; // base cash per kill, scaled by the enemy's budget cost
 export const CASH_BOSS = 240; // flat bounty for downing a boss

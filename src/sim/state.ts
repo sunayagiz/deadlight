@@ -65,6 +65,8 @@ export function createGameState(
     walls: [...walls], // copy: each GameState must be an independent snapshot (netcode)
     doors: doors.map((d) => ({ ...d })),
     intensity: 0,
+    zedTime: 0,
+    zedCharge: 0,
     director: { peaked: false, relaxT: 0, hpRef: players.reduce((s, p) => s + p.hp, 0) },
     gameOver: false,
     won: false,
@@ -109,6 +111,7 @@ export function emptyInput(): PlayerInput {
     reroll: false,
     banish: -1,
     use: false,
+    ability: false,
     ping: null,
     place: null,
   };

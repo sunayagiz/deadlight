@@ -146,11 +146,19 @@ export function updateFiring(
   p.fireCooldown = 1 / (def.fireRate * rateScale * fireRateMult(state));
 }
 
-/** Integrate bullet motion and age them. Removal + explosions happen in combat. */
-export function updateBullets(state: GameState, dt: number): void {
+/**
+ * Integrate bullet motion and age them. Removal + explosions happen in combat.
+ *
+ * `hostileScale` (A9 Zed-Time) slows ENEMY (hostile) projectiles only: their
+ * position AND ttl integrate with `dt * hostileScale`, so an acid glob crawls
+ * but still travels its full range (dodge-able in bullet-time). Player bullets
+ * always use full `dt`, so the squad's fire is unaffected.
+ */
+export function updateBullets(state: GameState, dt: number, hostileScale = 1): void {
   for (const b of state.bullets) {
-    b.pos.x += b.vel.x * dt;
-    b.pos.y += b.vel.y * dt;
-    b.ttl -= dt;
+    const bdt = b.hostile ? dt * hostileScale : dt;
+    b.pos.x += b.vel.x * bdt;
+    b.pos.y += b.vel.y * bdt;
+    b.ttl -= bdt;
   }
 }

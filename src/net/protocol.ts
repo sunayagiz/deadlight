@@ -52,6 +52,8 @@ export interface Snapshot {
   noticeT: number;
   boxR: { weapon: WeaponId; t: number } | null;
   int: number; // AI Director intensity 0..1 (B5 dynamic music reads it client-side)
+  zt: number; // A9: zedTime — slow-mo seconds remaining (all clients slow identically)
+  zc: number; // A9: zedCharge — 0..1 meter (all clients render the same HUD gauge)
   dep: Deployable[]; // A7: placed barricades + traps (all clients render them)
   ndep: number; // nextDeployableId
 }
@@ -91,6 +93,8 @@ export function snapshot(s: GameState): Snapshot {
     noticeT: s.noticeT,
     boxR: s.boxReveal,
     int: s.intensity,
+    zt: s.zedTime,
+    zc: s.zedCharge,
     dep: s.deployables,
     ndep: s.nextDeployableId,
   };
@@ -134,6 +138,8 @@ export function applySnapshot(s: GameState, snap: Snapshot): void {
   s.noticeT = snap.noticeT;
   s.boxReveal = snap.boxR;
   s.intensity = snap.int;
+  s.zedTime = snap.zt;
+  s.zedCharge = snap.zc;
   s.deployables = snap.dep;
   s.nextDeployableId = snap.ndep;
 }

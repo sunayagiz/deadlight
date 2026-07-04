@@ -1,4 +1,4 @@
-import { BOOMER_BLAST_DMG, BOOMER_BLAST_RADIUS, BULLET_KNOCKBACK, CASH_BOSS, CASH_PER_HIT, CASH_PER_KILL, PLAYER_RADIUS, POWERUP_DROP_CHANCE } from '../config';
+import { BOOMER_BLAST_DMG, BOOMER_BLAST_RADIUS, BULLET_KNOCKBACK, CASH_BOSS, CASH_PER_HIT, CASH_PER_KILL, PLAYER_RADIUS, POWERUP_DROP_CHANCE, ZED_CHARGE_PER_KILL } from '../config';
 import { affixBulletResist, affixExplodesOnDeath } from './affix';
 import { cashMult, dropPowerUp, rollPowerUp } from './cod';
 import { directorDropMult } from './director';
@@ -95,8 +95,13 @@ function explode(state: GameState, at: Vec2, radius: number, damage: number, own
  * Resolve all damage for one tick, using final post-movement positions.
  * Order: bullets (hit / wall / expire, with explosions), clear the dead,
  * then living enemies deal contact damage to a non-dashing player.
+ *
+ * `enemyScale` (A9 Zed-Time) slows ONLY the enemy-driven half of the tick: the
+ * contact-damage DPS (and the thorns it triggers) integrate with `dt * enemyScale`
+ * so a slowed horde claws slower, while bullet resolution, kills, cash and drops
+ * are position-based and stay full-rate. Player bullets already flew full-speed.
  */
-export function updateCombat(state: GameState, dt: number, rng: () => number = Math.random): void {
+export function updateCombat(state: GameState, dt: number, rng: () => number = Math.random, enemyScale = 1): void {
   const solids = mapSolids(state);
   const surviving: BulletState[] = [];
   for (const b of state.bullets) {
@@ -158,6 +163,7 @@ export function updateCombat(state: GameState, dt: number, rng: () => number = M
     } else {
       state.wave.killsThisWave += 1;
       state.totalKills += 1; // run-wide tally for the daily score
+      state.zedCharge = Math.min(1, state.zedCharge + ZED_CHARGE_PER_KILL); // A9: kills charge the Zed-Time meter
       const bounty = ZOMBIES[e.type].boss ? CASH_BOSS : CASH_PER_KILL * ZOMBIES[e.type].cost;
       state.cash += Math.round(bounty * greed * cm); // Double Points doubles kill cash too
       dropLoot(state, e.pos, rng, dropMult);
@@ -171,6 +177,7 @@ export function updateCombat(state: GameState, dt: number, rng: () => number = M
   // Enemy contact damage (DPS) — each enemy claws the nearest standing player it
   // overlaps; the thorns perk reflects damage back onto the attacker.
   const thorns = thornsDamage(state);
+  const edt = dt * enemyScale; // A9: contact DPS (and the thorns it triggers) slow with the horde
   for (const e of state.enemies) {
     const def = ZOMBIES[e.type];
     const rr = def.radius + PLAYER_RADIUS;
@@ -179,9 +186,9 @@ export function updateCombat(state: GameState, dt: number, rng: () => number = M
     const dx = p.pos.x - e.pos.x;
     const dy = p.pos.y - e.pos.y;
     if (dx * dx + dy * dy <= rr * rr) {
-      hurt(state, p, def.contactDamage * dt);
+      hurt(state, p, def.contactDamage * edt);
       if (thorns > 0) {
-        e.hp -= thorns * dt;
+        e.hp -= thorns * edt;
         e.hitFlash = HIT_FLASH;
       }
     }

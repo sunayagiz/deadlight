@@ -19,6 +19,7 @@ export interface PlayerInput {
   reroll: boolean; // reroll the current perk draft for cash this tick (intermission only)
   banish: number; // banish draft option i (0..PERK_CHOICES-1) from the run's pool; -1 = none
   use: boolean; // interact with the nearest buyable (door/box/PaP/wall/power) this tick
+  ability: boolean; // A9: trigger Zed-Time this tick (fires only when the shared meter is full)
   ping: { x: number; y: number } | null; // world point the player pinged this tick; null = no ping
   place: { x: number; y: number; kind: DeployableKind } | null; // A7: request to build a deployable at a world point; null = none
 }
@@ -268,6 +269,9 @@ export interface GameState {
   walls: Wall[];
   doors: Door[];
   intensity: number; // AI Director stress accumulator, 0..1 (serialized; B5 dynamic music reads it)
+  // ── A9: Zed-Time (shared slow-mo) — both serialized so every client slows identically ──
+  zedTime: number; // seconds of slow-mo remaining (0 = off); counts down in REAL time
+  zedCharge: number; // 0..1 charge meter; fills on kills, spent to 0 on activation
   director: DirectorState; // host-internal Director pacing bookkeeping (not serialized)
   gameOver: boolean;
   won: boolean; // true = the squad escaped (extraction complete)

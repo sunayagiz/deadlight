@@ -17,6 +17,7 @@ import { buy } from './shop';
 import { updateWaves, type Rng } from './waves';
 import { cycleWeapon, equipWeapon, updateAim, updateBullets, updateFiring } from './weapons';
 import { emptyInput } from './state';
+import { ZED_DRAIN_PER_SEC, ZED_DURATION, ZED_TIMESCALE } from '../config';
 import { isUp, type GameState, type PlayerInput } from './types';
 
 /**
@@ -34,6 +35,23 @@ export function stepSim(
   state.time += dt;
   state.player = state.players[0]; // keep the solo/host alias live
   if (state.gameOver) return; // freeze the world on death; the scene shows the end state
+
+  // ── A9: Zed-Time (shared slow-mo) ──────────────────────────────────────────
+  // The window counts down in REAL (unscaled) time, then any UP player can pop a
+  // full meter to re-arm it. Deterministic (dt-driven, no wall-clock). A full,
+  // banked meter never bleeds — so an activation is always honoured — but partial
+  // progress drains so it can't be trickled to full over a long lull.
+  if (state.zedTime > 0) state.zedTime = Math.max(0, state.zedTime - dt);
+  const triggered = list.some((inp, i) => inp?.ability && isUp(state.players[i] ?? state.players[0]));
+  if (triggered && state.zedCharge >= 1 && state.zedTime <= 0) {
+    state.zedTime = ZED_DURATION;
+    state.zedCharge = 0;
+  } else if (state.zedTime <= 0 && state.zedCharge > 0 && state.zedCharge < 1) {
+    state.zedCharge = Math.max(0, state.zedCharge - ZED_DRAIN_PER_SEC * dt);
+  }
+  // While active, the enemy-affecting updates below run on a slowed clock; the
+  // per-player loop (movement/fire/dash/melee) always uses full `dt`.
+  const zs = state.zedTime > 0 ? ZED_TIMESCALE : 1;
 
   updateCodTimers(state, dt); // Insta-Kill / Double Points / Fire Sale / notice timers
   updateDoors(state);
@@ -78,13 +96,16 @@ export function stepSim(
   placeDeployables(state, list); // A7: fold build actions into new barricades / traps
   updatePings(state, list, dt); // co-op pings: age out + fold this tick's ping actions in
   updateRevives(state, list, dt); // bleedout + teammate revives
-  updateEnemies(state.enemies, state.players, solids, dt, flow, enemySpeedScale(state.wave.index));
-  updateRangedEnemies(state, dt); // spitters lob acid
+  // A9: enemies + their projectiles + boss attack timers run at `dt * zs` (slowed
+  // in Zed-Time); traps/barricades/waves stay on real dt (squad-side space control
+  // and pacing shouldn't slow with the horde — see zs above; zs === 1 when off).
+  updateEnemies(state.enemies, state.players, solids, dt * zs, flow, enemySpeedScale(state.wave.index));
+  updateRangedEnemies(state, dt * zs); // spitters lob acid
   updateTraps(state, dt); // A7: electric-floor traps zap enemies in range (before combat clears the dead → trap kills pay out)
   updateBarricadeAttacks(state, dt); // A7: enemies chew barricades they're blocked by; destroyed ones are removed
-  updateBosses(state, dt, rng);
-  updateBullets(state, dt);
-  updateCombat(state, dt, rng);
+  updateBosses(state, dt * zs, rng);
+  updateBullets(state, dt, zs); // hostile projectiles slow; player bullets keep full dt
+  updateCombat(state, dt, rng, zs); // enemy contact DPS slows; bullet hits/kills/cash stay full-rate
   updatePowerups(state, dt); // pick up dropped power-ups
   updateLoot(state, dt);
   updateDirector(state, dt); // AI Director: read stress → intensity (throttle + drop bias read below)
