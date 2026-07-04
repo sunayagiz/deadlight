@@ -2,10 +2,13 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
     <title>Deadlight</title>
     <style>
       html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; }
-      #game { width: 100vw; height: 100vh; }
+      /* touch-action:none stops the browser from panning/zooming while the virtual
+         sticks are being dragged; the game handles all gestures itself. */
+      #game { width: 100vw; height: 100vh; touch-action: none; -webkit-user-select: none; user-select: none; }
     </style>
   </head>
   <body>

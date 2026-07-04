@@ -43,6 +43,7 @@ import type { GuestNet, HostNet } from '../net/net';
 import { applySnapshot, snapshot } from '../net/protocol';
 import { getSession } from '../net/session';
 import { InputCollector } from './input';
+import { TouchControls } from './touch';
 import { FixedLoop } from './loop';
 
 /** Per-slot accent so teammates are distinguishable. */
@@ -157,6 +158,7 @@ export class GameScene extends Phaser.Scene {
   private state!: GameState;
   private loop = new FixedLoop(SIM_DT);
   private inputCollector!: InputCollector;
+  private touch!: TouchControls; // A10: mobile twin-stick overlay (inert on desktop)
   private role: 'solo' | 'host' | 'guest' = 'solo';
   private localIndex = 0;
   // Daily/seeded run: one stateful rng instance per run, threaded to every stepSim
@@ -437,6 +439,9 @@ export class GameScene extends Phaser.Scene {
     // Player bodies/weapons are created per slot on demand in renderState.
     this.camTarget = this.add.image(map.playerStart.x, map.playerStart.y, 'player').setVisible(false);
     this.inputCollector = new InputCollector(this);
+    // A10: virtual touch controls. Reads multi-touch and overlays PlayerInput in
+    // update(); hidden + inert on non-touch devices so desktop is unaffected.
+    this.touch = new TouchControls(this, this.inputCollector);
 
     // Darkness overlay: fill a screen-sized render texture pinned to the camera,
     // erase soft light textures out of it (in screen space). Screen-sized + camera
@@ -984,6 +989,9 @@ export class GameScene extends Phaser.Scene {
     this.pointerOverUI =
       !!this.state.perkDraft || (shopOpen && ptr.x > 318 && ptr.x < 642 && ptr.y > 262 && ptr.y < 552);
     const input = this.inputCollector.sample();
+    // A10: overlay virtual-stick + button state onto the sampled input (no-op on
+    // desktop). Right stick is a direction → world point relative to the local player.
+    this.touch.apply(input, this.local().pos);
     // don't fire the weapon when clicking a shop button or picking a perk
     if (this.pointerOverUI) {
       input.fire = false;

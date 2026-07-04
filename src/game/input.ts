@@ -70,6 +70,14 @@ export class InputCollector {
   requestBanish(index: number): void {
     this.pendingBanish = index;
   }
+  /** A10 (touch): cycle the build bar — identical to pressing [B]. */
+  requestBuildCycle(): void {
+    this.buildIndex = this.buildIndex >= BUILD_KINDS.length - 1 ? -1 : this.buildIndex + 1;
+  }
+  /** A10 (touch): request a weapon cycle (+1 next / -1 prev) — same path as [Q]/[E]. */
+  requestWeaponCycle(dir: number): void {
+    this.pendingCycle = dir;
+  }
 
   sample(): PlayerInput {
     const pointer = this.scene.input.activePointer;
