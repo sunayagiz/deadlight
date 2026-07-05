@@ -1648,6 +1648,13 @@ export class GameScene extends Phaser.Scene {
       this.minimapDot.fillStyle(PING_KIND_COLOR[pg.kind] ?? 0xffffff, Math.min(1, pg.ttl / 1.2));
       this.minimapDot.fillCircle(mx + pg.x * scale, my + pg.y * scale, 2);
     }
+    // highlight remaining enemies (<= 3) when wave is active so players don't get stuck searching
+    if (this.state.wave.phase === 'active' && this.state.enemies.length <= 3) {
+      this.minimapDot.fillStyle(0xff3333, 1);
+      for (const e of this.state.enemies) {
+        this.minimapDot.fillCircle(mx + e.pos.x * scale, my + e.pos.y * scale, 2.2);
+      }
+    }
   }
 
   /**
