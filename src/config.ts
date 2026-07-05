@@ -216,6 +216,14 @@ export const ZED_CHARGE_PER_KILL = 0.05; // meter fill per kill (0..1) → ~20 k
 // moment). Partial charge bleeds so it can't be trickled up over a long lull.
 export const ZED_DRAIN_PER_SEC = 0.01; // 0 = never drains; here a half-full meter empties in ~50 s
 
+// --- B10: host-side lag compensation for guest shots (favor-the-shooter) ---
+// The host keeps a short rolling history of enemy positions. When it spawns a
+// bullet for a GUEST (a player viewing a slightly stale snapshot), it rewinds
+// the enemies to where that guest SAW them for the overlap test only. Bounded to
+// this many ticks (≈0.2s at 60Hz) so a rewind can never reach through walls or
+// across the map. Host/solo local shots view the live world → lag 0 → no rewind.
+export const LAGCOMP_HISTORY = 12; // ticks of enemy-position history kept on the host
+
 // --- Economy (between-wave shop) ---
 export const CASH_PER_KILL = 7; // base cash per kill, scaled by the enemy's budget cost
 export const CASH_BOSS = 240; // flat bounty for downing a boss

@@ -100,6 +100,7 @@ export function createGameState(
     boxReveal: null,
     deployables: [],
     nextDeployableId: 1,
+    lagHistory: { frames: [] }, // B10: host-only rolling enemy-position buffer (never serialized)
   };
 }
 
@@ -122,5 +123,6 @@ export function emptyInput(): PlayerInput {
     ability: false,
     ping: null,
     place: null,
+    viewTick: 0, // B10: no view stamp → host/solo/live → no lag compensation
   };
 }

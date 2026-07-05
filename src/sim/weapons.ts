@@ -1,4 +1,5 @@
 import { PAP_TIER_DMG } from '../config';
+import { bulletLagFor } from './lagcomp';
 import { damageMult, fireRateMult } from './perks';
 import type { GameState, PlayerInput, PlayerState, WeaponId, WeaponKind } from './types';
 
@@ -125,6 +126,10 @@ export function updateFiring(
   const pap = PAP_TIER_DMG[state.papTier[p.weapon] ?? 0] ?? 1; // Pack-a-Punch tier multiplier
   const dmg = def.damage * damageMult(state) * pap; // perk- + PaP-scaled
   const owner = state.players.indexOf(p); // life-steal credit / friendly-fire attribution
+  // B10: how far to rewind enemies for THIS shot's hit test. Host/solo local
+  // player views the live world (viewTick 0) → lag 0 → today's exact path. A
+  // guest firing off a stale snapshot gets a bounded positive rewind.
+  const lag = bulletLagFor(state, input.viewTick);
   const pellets = def.pellets ?? 1;
   const spread = def.spread ?? 0;
   for (let i = 0; i < pellets; i++) {
@@ -140,6 +145,7 @@ export function updateFiring(
       splashDamage: (def.splashDamage ?? 0) * damageMult(state) * pap,
       hostile: false,
       owner,
+      lag,
     });
   }
   if (def.startAmmo !== undefined) p.ammo[def.id] = (p.ammo[def.id] ?? 0) - 1;

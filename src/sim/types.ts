@@ -22,6 +22,7 @@ export interface PlayerInput {
   ability: boolean; // A9: trigger Zed-Time this tick (fires only when the shared meter is full)
   ping: { x: number; y: number } | null; // world point the player pinged this tick; null = no ping
   place: { x: number; y: number; kind: DeployableKind } | null; // A7: request to build a deployable at a world point; null = none
+  viewTick: number; // B10: sim tick of the snapshot the sender was viewing when it built this input. A guest stamps its last-applied snapshot tick; the host derives per-bullet rewind (lag) from currentTick - viewTick. 0 = live/host/solo view → no rewind. Off-wire host-internal derivation; carried on the input only.
 }
 
 /**
@@ -129,6 +130,7 @@ export interface BulletState {
   splashDamage: number;
   hostile: boolean; // true = enemy projectile that damages the player
   owner: number; // firing player's slot (-1 = enemy/hostile); used for life-steal credit
+  lag: number; // B10: ticks to rewind the enemy overlap test for this bullet (favor-the-shooter). 0 = host/solo/live-view — the unchanged current-position path. Only guest shots with a stale view get lag > 0 (clamped to LAGCOMP_HISTORY).
 }
 
 export interface LootState {
@@ -281,6 +283,25 @@ export interface WaveState {
   spawnCursor: number; // round-robins the spawn across zones so they don't cluster
 }
 
+/**
+ * B10 — host-only rolling history of enemy positions for lag compensation.
+ * One `LagFrame` per past tick; `pos` is a flat snapshot of every live enemy's
+ * id + position AS OF that tick. Host-internal: NOT serialized (snapshot() never
+ * copies it), so it never bloats the wire. Reconstructed each tick from the sim.
+ */
+export interface EnemyPosRec {
+  id: number;
+  x: number;
+  y: number;
+}
+export interface LagFrame {
+  tick: number; // sim tick these positions belong to (round(time / SIM_DT))
+  pos: EnemyPosRec[]; // every live enemy's id + position at that tick
+}
+export interface LagHistory {
+  frames: LagFrame[]; // rolling buffer, oldest first, capped at LAGCOMP_HISTORY
+}
+
 /** Serializable plain data — this is what will go over the wire in the netcode slice. */
 export interface GameState {
   time: number; // seconds
@@ -333,4 +354,6 @@ export interface GameState {
   // ── A7: buildable defences ──
   deployables: Deployable[]; // placed barricades + traps (host-authoritative, serialized)
   nextDeployableId: number;
+  // ── B10: host-side lag compensation ──
+  lagHistory?: LagHistory; // rolling enemy-position history (host-only; NOT serialized — snapshot() skips it). Absent on guests (they never run the sim / hit test).
 }

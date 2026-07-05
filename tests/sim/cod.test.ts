@@ -11,7 +11,7 @@ function fresh(): GameState {
   return createGameState([], [{ x: 0, y: 0 }], [], { x: 100, y: 100 }, { width: 3000, height: 3000 }, 1);
 }
 function bulletAt(x: number, y: number, dmg: number): BulletState {
-  return { id: 1, pos: { x, y }, vel: { x: 100, y: 0 }, ttl: 1, damage: dmg, splashRadius: 0, splashDamage: 0, hostile: false, owner: 0 };
+  return { id: 1, pos: { x, y }, vel: { x: 100, y: 0 }, ttl: 1, damage: dmg, splashRadius: 0, splashDamage: 0, hostile: false, owner: 0, lag: 0 };
 }
 const use = () => [{ ...emptyInput(), use: true }];
 

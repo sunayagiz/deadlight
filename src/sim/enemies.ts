@@ -272,6 +272,7 @@ export function updateRangedEnemies(state: GameState, dt: number): void {
       splashDamage: 0,
       hostile: true,
       owner: -1,
+      lag: 0, // hostile projectiles never lag-compensate (they hit players, not history-tracked enemies)
     });
   };
   for (const e of state.enemies) {

@@ -1252,6 +1252,11 @@ export class GameScene extends Phaser.Scene {
     if (this.role === 'guest') {
       // Guests send intent and render the host's snapshots, but PREDICT their own
       // player locally so their movement/aim feels instant despite round-trip lag.
+      // B10: stamp the input with the tick of the snapshot the guest is currently
+      // viewing. The host uses currentTick - viewTick to rewind enemies to where
+      // this guest SAW them when it fired (favor-the-shooter). Host/solo leave
+      // viewTick 0 → no rewind, so their shots keep the exact live-world path.
+      input.viewTick = this.guestNet!.latest ? Math.round(this.guestNet!.latest.t / SIM_DT) : 0;
       this.guestNet!.sendInput(input);
       if (this.guestNet!.latest) {
         applySnapshot(this.state, this.guestNet!.latest);

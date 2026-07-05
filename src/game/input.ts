@@ -117,6 +117,7 @@ export class InputCollector {
       ability: Phaser.Input.Keyboard.JustDown(this.keys.X), // A9: pop Zed-Time (edge-triggered)
       ping,
       place,
+      viewTick: 0, // B10: GameScene stamps this on the guest before sendInput; 0 = live/host/solo (no lag comp)
     };
   }
 }

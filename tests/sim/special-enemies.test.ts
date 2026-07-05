@@ -93,7 +93,7 @@ describe('stalker (flank tactic)', () => {
 
 describe('armored (melee-only)', () => {
   function bullet(x: number, y: number, dmg: number): BulletState {
-    return { id: 1, pos: { x, y }, vel: { x: 100, y: 0 }, ttl: 1, damage: dmg, splashRadius: 0, splashDamage: 0, hostile: false, owner: 0 };
+    return { id: 1, pos: { x, y }, vel: { x: 100, y: 0 }, ttl: 1, damage: dmg, splashRadius: 0, splashDamage: 0, hostile: false, owner: 0, lag: 0 };
   }
 
   it('shrugs off most bullet damage (75% resisted)', () => {

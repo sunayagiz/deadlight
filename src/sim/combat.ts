@@ -4,6 +4,7 @@ import { cashMult, dropPowerUp, rollPowerUp } from './cod';
 import { directorDropMult } from './director';
 import { downPlayer } from './coop';
 import { ZOMBIES } from './enemies';
+import { rewoundEnemyPos } from './lagcomp';
 import { dropLoot } from './loot';
 import { mapSolids } from './map';
 import { isInvulnerable } from './movement';
@@ -58,11 +59,20 @@ function insideWall(pos: Vec2, walls: Wall[]): boolean {
 }
 
 function firstEnemyHit(state: GameState, b: BulletState) {
+  // B10: a guest bullet (lag > 0) tests against each enemy's position AS OF the
+  // tick the shooter saw (favor-the-shooter). lag === 0 (host/solo/live) uses the
+  // enemy's CURRENT pos — byte-for-byte the pre-B10 path. Only the overlap
+  // POSITION is rewound; the hit enemy, damage, knockback and payout are the
+  // live enemy resolved by the caller. Rewind is bounded (clampLag) so a stale
+  // shot can't reach across the map, and walls are checked at the bullet's real
+  // position elsewhere, so it can't hit through them.
+  const lag = b.lag ?? 0;
   for (const e of state.enemies) {
     if (e.hp <= 0) continue;
     const r = ZOMBIES[e.type].radius;
-    const dx = b.pos.x - e.pos.x;
-    const dy = b.pos.y - e.pos.y;
+    const ep = lag > 0 ? rewoundEnemyPos(state, e, lag) : e.pos;
+    const dx = b.pos.x - ep.x;
+    const dy = b.pos.y - ep.y;
     if (dx * dx + dy * dy <= r * r) return e;
   }
   return undefined;
