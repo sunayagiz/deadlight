@@ -193,8 +193,39 @@ export function updateEnemies(
         e.cd = STALKER_LUNGE_CD;
       }
     } else {
-      const seek =
-        (flow && sampleFlow(flow, e.pos.x, e.pos.y)) ?? norm({ x: tdx, y: tdy });
+      let seekVec = flow ? sampleFlow(flow, e.pos.x, e.pos.y) : null;
+      if (!seekVec && flow) {
+        // Zombie slipped into a wall cell (sampleFlow returned null).
+        // Search immediate neighbors for a valid flow vector to snap them back
+        // to the path, rather than falling back to straight-line seek.
+        let bestDist = Infinity;
+        const cx = Math.floor(e.pos.x / flow.cell);
+        const cy = Math.floor(e.pos.y / flow.cell);
+        for (let r = 1; r <= 2; r++) {
+          for (let ddy = -r; ddy <= r; ddy++) {
+            for (let ddx = -r; ddx <= r; ddx++) {
+              if (Math.abs(ddx) !== r && Math.abs(ddy) !== r) continue;
+              const nx = cx + ddx;
+              const ny = cy + ddy;
+              if (nx < 0 || ny < 0 || nx >= flow.cols || ny >= flow.rows) continue;
+              const ni = ny * flow.cols + nx;
+              const ndx = flow.dirX[ni];
+              const ndy = flow.dirY[ni];
+              if (ndx !== 0 || ndy !== 0) {
+                const cellCenterX = (nx + 0.5) * flow.cell;
+                const cellCenterY = (ny + 0.5) * flow.cell;
+                const distSq = (cellCenterX - e.pos.x) ** 2 + (cellCenterY - e.pos.y) ** 2;
+                if (distSq < bestDist) {
+                  bestDist = distSq;
+                  seekVec = { x: ndx, y: ndy };
+                }
+              }
+            }
+          }
+          if (seekVec) break;
+        }
+      }
+      const seek = seekVec ?? norm({ x: tdx, y: tdy });
       let skx = seek.x;
       let sky = seek.y;
       // Spitter keeps its distance: back off when the player gets inside standoff range.
