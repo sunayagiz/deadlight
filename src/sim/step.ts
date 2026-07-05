@@ -5,7 +5,7 @@ import { placeDeployables, updateBarricadeAttacks, updateTraps } from './deploya
 import { updateDirector } from './director';
 import { updateRevives } from './coop';
 import { enemySpeedScale, updateEnemies, updateRangedEnemies } from './enemies';
-import { updateExtraction } from './extraction';
+import { updateDefend, updateExtraction } from './extraction';
 import { getFlowField } from './flowfield';
 import { updateLoot } from './loot';
 import { mapSolids, updateDoors } from './map';
@@ -17,7 +17,7 @@ import { buy } from './shop';
 import { updateWaves, type Rng } from './waves';
 import { cycleWeapon, equipWeapon, updateAim, updateBullets, updateFiring } from './weapons';
 import { emptyInput } from './state';
-import { ZED_DRAIN_PER_SEC, ZED_DURATION, ZED_TIMESCALE } from '../config';
+import { DEFEND_WAVES, ZED_DRAIN_PER_SEC, ZED_DURATION, ZED_TIMESCALE } from '../config';
 import { isUp, type GameState, type PlayerInput } from './types';
 
 /**
@@ -110,7 +110,8 @@ export function stepSim(
   updateLoot(state, dt);
   updateDirector(state, dt); // AI Director: read stress → intensity (throttle + drop bias read below)
   updateWaves(state, dt, rng, flow); // flow gates spawns to reachable (opened) rooms; reads Director throttle
-  updateExtraction(state, dt); // final-wave escape objective / win condition
+  updateExtraction(state, dt); // A8: extraction-mode escape objective / win condition
+  updateDefend(state, DEFEND_WAVES); // A8: defend-mode generator win/lose check (no-op in other modes)
 
   if (state.players.every((p) => !p.alive)) state.gameOver = true; // whole squad down
 }

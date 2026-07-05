@@ -137,7 +137,12 @@ let cacheField: FlowField | null = null;
 export function getFlowField(state: GameState, solids: Wall[]): FlowField {
   // sources = every standing player; enemies flow toward whichever is nearest by path
   const up = state.players.filter((p) => p.alive && !p.downed);
-  const sources = (up.length > 0 ? up : state.players).map((p) => p.pos);
+  const sources: Vec2[] = (up.length > 0 ? up : state.players).map((p) => p.pos);
+  // A8 defend: the live generator is an extra flow source, so part of the horde
+  // paths to it and claws it even when the squad kites away — the objective can
+  // genuinely be lost. Drops out of the sources (and the cache key) once destroyed.
+  const gen = state.mode === 'defend' && state.objective && state.objective.hp > 0 ? state.objective : null;
+  if (gen) sources.push({ x: gen.x, y: gen.y });
   // include a barricade signature so placing/destroying one (A7) reroutes the horde
   const bar = state.deployables.map((d) => (d.kind === 'barricade' && (d.hp ?? 0) > 0 ? `${d.id}` : '')).join('');
   const key = `${sources.map((s) => `${Math.floor(s.x / FLOW_CELL)},${Math.floor(s.y / FLOW_CELL)}`).join(';')}|${state.doors.map((d) => (d.open ? 1 : 0)).join('')}|${bar}|${state.mapW}x${state.mapH}`;

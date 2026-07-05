@@ -1,5 +1,5 @@
-import { PLAYER_MAX_HP, SELF_REVIVE_CHARGES, WAVE_INTERMISSION } from '../config';
-import type { Door, GameState, Interactable, PlayerInput, PlayerState, SpawnZone, Wall } from './types';
+import { GENERATOR_HP, PLAYER_MAX_HP, SELF_REVIVE_CHARGES, WAVE_INTERMISSION } from '../config';
+import type { Door, GameMode, GameState, Interactable, PlayerInput, PlayerState, SpawnZone, Wall } from './types';
 
 export function createPlayer(x: number, y: number): PlayerState {
   return {
@@ -32,6 +32,8 @@ export function createGameState(
   numPlayers = 1,
   extractPoint: { x: number; y: number } = { x: dims.width - 220, y: dims.height - 220 },
   interactables: Interactable[] = [],
+  mode: GameMode = 'endless', // A8: run objective; endless keeps every existing entry point unchanged
+  generatorPoint: { x: number; y: number } = playerStart, // A8: defend-mode generator location
 ): GameState {
   // fan the co-op squad out slightly around the start so they don't stack
   const players = Array.from({ length: Math.max(1, numPlayers) }, (_, i) => {
@@ -40,6 +42,12 @@ export function createGameState(
   });
   return {
     time: 0,
+    mode,
+    // Defend: stand up the generator at its fixed point with full HP. Other modes carry no objective.
+    objective:
+      mode === 'defend'
+        ? { x: generatorPoint.x, y: generatorPoint.y, hp: GENERATOR_HP, maxHp: GENERATOR_HP }
+        : null,
     mapW: dims.width,
     mapH: dims.height,
     players,

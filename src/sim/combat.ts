@@ -1,4 +1,4 @@
-import { BOOMER_BLAST_DMG, BOOMER_BLAST_RADIUS, BULLET_KNOCKBACK, CASH_BOSS, CASH_PER_HIT, CASH_PER_KILL, PLAYER_RADIUS, POWERUP_DROP_CHANCE, ZED_CHARGE_PER_KILL } from '../config';
+import { BOOMER_BLAST_DMG, BOOMER_BLAST_RADIUS, BULLET_KNOCKBACK, CASH_BOSS, CASH_PER_HIT, CASH_PER_KILL, GENERATOR_RADIUS, PLAYER_RADIUS, POWERUP_DROP_CHANCE, ZED_CHARGE_PER_KILL } from '../config';
 import { affixBulletResist, affixExplodesOnDeath } from './affix';
 import { cashMult, dropPowerUp, rollPowerUp } from './cod';
 import { directorDropMult } from './director';
@@ -191,6 +191,19 @@ export function updateCombat(state: GameState, dt: number, rng: () => number = M
         e.hp -= thorns * edt;
         e.hitFlash = HIT_FLASH;
       }
+    }
+  }
+
+  // A8 defend: any enemy overlapping the generator claws it down at its contact
+  // DPS (the same model as clawing a player). The win/lose read of the result
+  // lives in updateDefend; here we only drain HP. Bosses hit it too.
+  const gen = state.objective;
+  if (gen && gen.hp > 0) {
+    for (const e of state.enemies) {
+      const rr = ZOMBIES[e.type].radius + GENERATOR_RADIUS;
+      const dx = gen.x - e.pos.x;
+      const dy = gen.y - e.pos.y;
+      if (dx * dx + dy * dy <= rr * rr) gen.hp = Math.max(0, gen.hp - ZOMBIES[e.type].contactDamage * edt);
     }
   }
   // gameOver (all players down/dead) is decided in stepSim.

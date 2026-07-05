@@ -186,10 +186,21 @@ export const DEPLOY_PLACE_RANGE = 220; // px: a deployable must be placed within
 
 // --- Endless survival ---
 // No win condition: waves continue forever, each round harder. The old extraction
-// exit is pushed out of reach (9999) so the run only ends when the squad falls.
-export const EXTRACTION_WAVE = 9999; // effectively unreachable → endless mode
+// exit is pushed out of reach (9999) so the ENDLESS run only ends when the squad
+// falls. Objective modes (A8) below reuse the same extraction machinery at a
+// reachable wave, or add a generator to defend.
+export const EXTRACTION_WAVE = 9999; // effectively unreachable → endless mode (legacy debug exit / ?ext)
 export const EXTRACT_HOLD = 14; // s a standing player must hold the extraction point
 export const EXTRACT_RADIUS = 110; // px radius of the extraction zone
+
+// --- A8: objective game modes (Deep-Rock-style variety over the same combat) ---
+// `extraction`: the exit lights up after surviving this many waves; reach + hold
+// it (EXTRACT_HOLD) to escape. `defend`: protect a generator (GENERATOR_HP) for
+// DEFEND_WAVES waves — enemies claw it down at their contact damage.
+export const EXTRACT_OPEN_WAVE = 10; // extraction mode: the exit opens once this wave is reached
+export const DEFEND_WAVES = 15; // defend mode: survive this many waves with the generator alive to win
+export const GENERATOR_HP = 3000; // defend mode: generator structure HP (enemies chew it at their contactDamage)
+export const GENERATOR_RADIUS = 34; // px: contact reach at which an adjacent enemy claws the generator
 
 // --- A9: Zed-Time field ability (Killing-Floor-style shared slow-mo) ---
 // A chargeable power spike: fill the meter with kills, trigger it, and every

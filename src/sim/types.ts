@@ -240,6 +240,25 @@ export interface ExtractionState {
 }
 
 /**
+ * A8 — the run's objective mode (chosen at run start, part of the initial state).
+ * `endless` = survive forever (default, die = game over); `extraction` = the exit
+ * opens after EXTRACT_OPEN_WAVE and holding it wins; `defend` = protect a
+ * generator for DEFEND_WAVES waves.
+ */
+export type GameMode = 'endless' | 'extraction' | 'defend';
+
+/**
+ * A8 — defend-mode objective: a generator the squad protects. Serialized so every
+ * client renders its HP bar. `null` on GameState in endless/extraction modes.
+ */
+export interface ObjectiveState {
+  x: number;
+  y: number;
+  hp: number;
+  maxHp: number;
+}
+
+/**
  * AI Director bookkeeping (host-internal pacing state). `intensity` itself lives
  * on GameState (serialized, client-facing); this holds only the cross-tick state
  * the Director needs to compute it. Not serialized — guests never run the sim.
@@ -265,6 +284,8 @@ export interface WaveState {
 /** Serializable plain data — this is what will go over the wire in the netcode slice. */
 export interface GameState {
   time: number; // seconds
+  mode: GameMode; // A8: run objective (set at run start; part of the initial serialized state)
+  objective: ObjectiveState | null; // A8: defend-mode generator (hp bar), null in endless/extraction
   mapW: number;
   mapH: number;
   players: PlayerState[]; // 1..4; host-authoritative

@@ -4,16 +4,23 @@ import { LOADOUTS, getLoadout } from '../game/loadouts';
 import { getProfile, getSelectedLoadout, isUnlocked, selectLoadout, spend, unlock } from '../game/profile';
 import { COLORBLIND_LABEL, cycleColorblind, getSettings, setSettings } from '../game/settings';
 import { resetTips } from '../game/tips';
+import type { GameMode } from '../sim/types';
 import { createGuest, createHost, makeRoomCode, type GuestNet, type HostNet } from './net';
 
 // `seed` present ⇒ a deterministic seeded run (daily challenge / shared seed).
 // Absent ⇒ a normal solo run driven by Math.random.
 // `loadout` = the meta-progression starting-loadout id the host/solo player picked
 // (render/session-layer only; applied by the host at run start, never netcoded).
+// `mode` = A8 objective (endless/extraction/defend); the host's mode defines the
+// match, carried into the initial serialized state (guests read it from the snapshot).
 export type GameConfig =
-  | { role: 'solo'; seed?: string; loadout?: string }
-  | { role: 'host'; net: HostNet; players: number; loadout?: string }
+  | { role: 'solo'; seed?: string; loadout?: string; mode?: GameMode }
+  | { role: 'host'; net: HostNet; players: number; loadout?: string; mode?: GameMode }
   | { role: 'guest'; net: GuestNet; you: number };
+
+// A8 — the three selectable objectives, cycled from the menu.
+const MODES: GameMode[] = ['endless', 'extraction', 'defend'];
+const MODE_LABEL: Record<GameMode, string> = { endless: 'SURVIVE', extraction: 'EXTRACT', defend: 'DEFEND' };
 
 const CSS = `
 #lobby{position:fixed;inset:0;background:#06070a;display:grid;place-items:center;font-family:monospace;color:#8fef9f;z-index:1000}
@@ -60,14 +67,26 @@ export function showLobby(): Promise<GameConfig> {
     root.id = 'lobby';
     document.body.appendChild(root);
 
+    // A8 — the objective the SOLO/HOST run starts in (cycled from the menu). Daily
+    // stays SURVIVE so its seeded leaderboard means one fixed thing.
+    let mode: GameMode = 'endless';
+
     const done = (cfg: GameConfig) => {
       root.remove();
       style.remove();
       resolve(cfg);
     };
 
+    const MODE_DESC: Record<GameMode, string> = {
+      endless: 'endless waves — die and the run ends',
+      extraction: 'survive 10 waves, then reach & hold the exit',
+      defend: 'protect the generator for 15 waves',
+    };
+
     const menu = () => {
       root.innerHTML = `<div class="box"><h1>DEADLIGHT</h1><div class="sub">CO-OP · UP TO 4</div>
+        <button id="mode">◎ MODE · ${MODE_LABEL[mode]}</button>
+        <div class="sub" style="margin:-2px 0 12px;color:#4d6b55">${MODE_DESC[mode]}</div>
         <button id="solo">▶ SOLO</button>
         <button id="daily">☠ DAILY CHALLENGE</button>
         <button id="host">⌂ HOST GAME</button>
@@ -77,9 +96,13 @@ export function showLobby(): Promise<GameConfig> {
         <button class="ghost" id="howto">⚑ HOW TO PLAY</button>
         <div class="sub" style="margin:14px 0 0">SEED · ${dailySeedString(todayYYYYMMDD())}</div></div>`;
       const loadout = getSelectedLoadout();
-      root.querySelector('#solo')!.addEventListener('click', () => done({ role: 'solo', loadout }));
+      root.querySelector('#mode')!.addEventListener('click', () => {
+        mode = MODES[(MODES.indexOf(mode) + 1) % MODES.length];
+        menu();
+      });
+      root.querySelector('#solo')!.addEventListener('click', () => done({ role: 'solo', loadout, mode }));
       root.querySelector('#daily')!.addEventListener('click', () =>
-        done({ role: 'solo', seed: dailySeedString(todayYYYYMMDD()), loadout }),
+        done({ role: 'solo', seed: dailySeedString(todayYYYYMMDD()), loadout }), // daily is always SURVIVE
       );
       root.querySelector('#host')!.addEventListener('click', hostFlow);
       root.querySelector('#join')!.addEventListener('click', joinFlow);
@@ -246,7 +269,7 @@ export function showLobby(): Promise<GameConfig> {
         startBtn.disabled = false;
         startBtn.addEventListener('click', () => {
           net.start(count);
-          done({ role: 'host', net, players: count, loadout: getSelectedLoadout() });
+          done({ role: 'host', net, players: count, loadout: getSelectedLoadout(), mode });
         });
       } catch (e) {
         root.querySelector('#msg')!.textContent = 'host failed — try again';
