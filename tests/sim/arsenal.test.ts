@@ -20,6 +20,7 @@ function rpgBullet(x: number, y: number): BulletState {
     splashDamage: def.splashDamage!,
     hostile: false,
     owner: 0,
+    lag: 0,
   };
 }
 

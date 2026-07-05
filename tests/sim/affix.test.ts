@@ -17,7 +17,7 @@ function fresh(): GameState {
 }
 
 function bullet(x: number, y: number, damage: number): BulletState {
-  return { id: 1, pos: { x, y }, vel: { x: 0, y: 0 }, ttl: 1, damage, splashRadius: 0, splashDamage: 0, hostile: false, owner: 0 };
+  return { id: 1, pos: { x, y }, vel: { x: 0, y: 0 }, ttl: 1, damage, splashRadius: 0, splashDamage: 0, hostile: false, owner: 0, lag: 0 };
 }
 
 describe('rollAffix (gating + determinism)', () => {

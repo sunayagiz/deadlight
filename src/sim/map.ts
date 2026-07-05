@@ -8,7 +8,8 @@ export interface MapDef {
   doors: Door[];
   spawnZones: SpawnZone[];
   playerStart: { x: number; y: number };
-  extractionPoint: { x: number; y: number }; // the escape exit (final wave win point)
+  extractionPoint: { x: number; y: number }; // the escape exit (extraction-mode win point)
+  generatorPoint: { x: number; y: number }; // A8 defend-mode: where the protected generator stands
   interactables: Interactable[]; // COD buyables: Mystery Box / Pack-a-Punch / wall guns / power
 }
 
@@ -161,6 +162,9 @@ export function buildMap(): MapDef {
     playerStart: { x: px(72) + 30, y: px(32) + 30 },
     // deep in the generator room (SE), reachable via the sewer — the run's exit
     extractionPoint: { x: px(130) + 30, y: px(57) + 30 },
+    // A8 defend: the generator sits in the LOBBY beside the spawn, so the squad
+    // holds a defensible starting room from wave 1 rather than a gated deep room.
+    generatorPoint: { x: px(78) + 30, y: px(30) + 30 },
     interactables: buildInteractables(),
   };
 }

@@ -27,6 +27,7 @@ function hostileBullet(
     splashDamage: 0,
     hostile: true,
     owner: -1,
+    lag: 0, // hostile projectiles never lag-compensate (they hit players, not history-tracked enemies)
   });
 }
 

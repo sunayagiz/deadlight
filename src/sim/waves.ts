@@ -3,6 +3,7 @@ import {
   BRUTE_MIN_WAVE,
   DOG_ROUND_EVERY,
   DOG_ROUND_FIRST,
+  EXTRACT_OPEN_WAVE,
   EXTRACTION_WAVE,
   GUARANTEED_AMMO_EVERY,
   FLASHLIGHT_HALF_ANGLE,
@@ -26,15 +27,15 @@ import { sampleFlow, type FlowField } from './flowfield';
 import { mapSolids } from './map';
 import { rollDraft } from './perks';
 import { segmentClear } from './vision';
-import type { EnemyType, GameState, SpawnZone } from './types';
+import type { EnemyType, GameMode, GameState, SpawnZone } from './types';
 
 /** Hellhound special round: from DOG_ROUND_FIRST, every DOG_ROUND_EVERY-th wave (never on a boss/final wave). */
-export function isDogRound(index: number): boolean {
+export function isDogRound(index: number, mode: GameMode = 'endless'): boolean {
   return (
     index >= DOG_ROUND_FIRST &&
     index % DOG_ROUND_EVERY === 0 &&
     !isBossWave(index) &&
-    index < EXTRACTION_WAVE
+    !isFinalWave(index, mode)
   );
 }
 
@@ -44,9 +45,14 @@ export function buildDogPack(index: number, squad = 1): EnemyType[] {
   return Array.from({ length: n }, () => 'hound' as EnemyType);
 }
 
-/** The last wave is the escape: an endless horde while the squad reaches the exit. */
-export function isFinalWave(index: number): boolean {
-  return index >= EXTRACTION_WAVE;
+/**
+ * The escape wave: an endless horde that never clears while the squad reaches the
+ * exit. Reached in `extraction` mode at EXTRACT_OPEN_WAVE, or via the legacy
+ * EXTRACTION_WAVE (`?ext`) in any mode. Endless/defend never hit it, so their
+ * waves clear and keep advancing normally.
+ */
+export function isFinalWave(index: number, mode: GameMode = 'endless'): boolean {
+  return index >= EXTRACTION_WAVE || (mode === 'extraction' && index >= EXTRACT_OPEN_WAVE);
 }
 
 export function isBossWave(index: number): boolean {
@@ -190,7 +196,7 @@ function startWave(state: GameState, rng: Rng, flow?: FlowField): void {
   wave.phase = 'active';
   // budget scales with how many players are still in the fight
   const squad = Math.max(1, state.players.filter((p) => p.alive).length);
-  state.dogRound = isDogRound(wave.index);
+  state.dogRound = isDogRound(wave.index, state.mode);
   if (state.dogRound) {
     wave.spawnQueue = buildDogPack(wave.index, squad); // a fast glowing hound pack
     setNotice(state, 'HELLHOUNDS');
@@ -249,7 +255,7 @@ export function updateWaves(state: GameState, dt: number, rng: Rng = Math.random
 
   // The final wave never clears — it just keeps topping up the horde until the
   // squad extracts (or dies). The escape objective decides the end (extraction.ts).
-  if (isFinalWave(wave.index)) {
+  if (isFinalWave(wave.index, state.mode)) {
     if (wave.spawnQueue.length === 0) {
       const squad = Math.max(1, state.players.filter((p) => p.alive).length);
       wave.spawnQueue = buildWaveQueue(wave.index, rng, squad);
@@ -271,7 +277,7 @@ export function updateWaves(state: GameState, dt: number, rng: Rng = Math.random
     wave.phase = 'intermission';
     wave.timer = WAVE_INTERMISSION;
     // roguelite draft after every Nth wave cleared (not on the run into the finale)
-    if (wave.index - 1 >= 1 && (wave.index - 1) % PERK_INTERVAL === 0 && !isFinalWave(wave.index)) {
+    if (wave.index - 1 >= 1 && (wave.index - 1) % PERK_INTERVAL === 0 && !isFinalWave(wave.index, state.mode)) {
       state.rerollCount = 0; // fresh draft → reroll cost starts at REROLL_BASE
       state.perkDraft = rollDraft(state, rng);
     }

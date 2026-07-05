@@ -4,8 +4,10 @@ import type {
   DraftOption,
   EnemyState,
   ExtractionState,
+  GameMode,
   GameState,
   Interactable,
+  ObjectiveState,
   LootState,
   PingState,
   PlayerState,
@@ -41,6 +43,8 @@ export interface Snapshot {
   rr: number; // rerollCount (drives the reroll cost on guests)
   ban: string[]; // banished perk ids
   extract: ExtractionState | null;
+  mode: GameMode; // A8: run objective (set at run start; host defines the match)
+  obj: ObjectiveState | null; // A8: defend-mode generator (hp bar) — null in endless/extraction
   inter: Interactable[]; // buyables (mystery box moves, so send them)
   pups: PowerUp[];
   power: boolean;
@@ -82,6 +86,8 @@ export function snapshot(s: GameState): Snapshot {
     rr: s.rerollCount,
     ban: s.banished,
     extract: s.extraction,
+    mode: s.mode,
+    obj: s.objective,
     inter: s.interactables,
     pups: s.powerups,
     power: s.powerOn,
@@ -127,6 +133,8 @@ export function applySnapshot(s: GameState, snap: Snapshot): void {
   s.rerollCount = snap.rr;
   s.banished = snap.ban;
   s.extraction = snap.extract;
+  s.mode = snap.mode;
+  s.objective = snap.obj;
   s.interactables = snap.inter;
   s.powerups = snap.pups;
   s.powerOn = snap.power;

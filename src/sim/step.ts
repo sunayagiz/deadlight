@@ -5,8 +5,9 @@ import { placeDeployables, updateBarricadeAttacks, updateTraps } from './deploya
 import { updateDirector } from './director';
 import { updateRevives } from './coop';
 import { enemySpeedScale, updateEnemies, updateRangedEnemies } from './enemies';
-import { updateExtraction } from './extraction';
+import { updateDefend, updateExtraction } from './extraction';
 import { getFlowField } from './flowfield';
+import { recordEnemyHistory } from './lagcomp';
 import { updateLoot } from './loot';
 import { mapSolids, updateDoors } from './map';
 import { updateMelee } from './melee';
@@ -17,7 +18,7 @@ import { buy } from './shop';
 import { updateWaves, type Rng } from './waves';
 import { cycleWeapon, equipWeapon, updateAim, updateBullets, updateFiring } from './weapons';
 import { emptyInput } from './state';
-import { ZED_DRAIN_PER_SEC, ZED_DURATION, ZED_TIMESCALE } from '../config';
+import { DEFEND_WAVES, ZED_DRAIN_PER_SEC, ZED_DURATION, ZED_TIMESCALE } from '../config';
 import { isUp, type GameState, type PlayerInput } from './types';
 
 /**
@@ -104,13 +105,18 @@ export function stepSim(
   updateTraps(state, dt); // A7: electric-floor traps zap enemies in range (before combat clears the dead → trap kills pay out)
   updateBarricadeAttacks(state, dt); // A7: enemies chew barricades they're blocked by; destroyed ones are removed
   updateBosses(state, dt * zs, rng);
+  // B10: snapshot post-move enemy positions BEFORE combat resolves. Host-only
+  // (guests never reach stepSim) and never serialized — lets a guest bullet's
+  // overlap test rewind to where the shooter saw the enemy this many ticks ago.
+  recordEnemyHistory(state);
   updateBullets(state, dt, zs); // hostile projectiles slow; player bullets keep full dt
   updateCombat(state, dt, rng, zs); // enemy contact DPS slows; bullet hits/kills/cash stay full-rate
   updatePowerups(state, dt); // pick up dropped power-ups
   updateLoot(state, dt);
   updateDirector(state, dt); // AI Director: read stress → intensity (throttle + drop bias read below)
   updateWaves(state, dt, rng, flow); // flow gates spawns to reachable (opened) rooms; reads Director throttle
-  updateExtraction(state, dt); // final-wave escape objective / win condition
+  updateExtraction(state, dt); // A8: extraction-mode escape objective / win condition
+  updateDefend(state, DEFEND_WAVES); // A8: defend-mode generator win/lose check (no-op in other modes)
 
   if (state.players.every((p) => !p.alive)) state.gameOver = true; // whole squad down
 }

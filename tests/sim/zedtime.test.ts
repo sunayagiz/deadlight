@@ -86,8 +86,8 @@ describe('A9 zed-time', () => {
     const s = createGameState([]);
     s.zedTime = ZED_DURATION;
     s.bullets = [
-      { id: 1, pos: { x: 0, y: 0 }, vel: { x: 100, y: 0 }, ttl: 5, damage: 1, splashRadius: 0, splashDamage: 0, hostile: true, owner: -1 },
-      { id: 2, pos: { x: 0, y: 300 }, vel: { x: 100, y: 0 }, ttl: 5, damage: 1, splashRadius: 0, splashDamage: 0, hostile: false, owner: 0 },
+      { id: 1, pos: { x: 0, y: 0 }, vel: { x: 100, y: 0 }, ttl: 5, damage: 1, splashRadius: 0, splashDamage: 0, hostile: true, owner: -1, lag: 0 },
+      { id: 2, pos: { x: 0, y: 300 }, vel: { x: 100, y: 0 }, ttl: 5, damage: 1, splashRadius: 0, splashDamage: 0, hostile: false, owner: 0, lag: 0 },
     ];
     stepSim(s, emptyInput(), SIM_DT);
     const hostile = s.bullets.find((b) => b.id === 1)!;

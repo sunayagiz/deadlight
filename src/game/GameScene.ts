@@ -6,9 +6,12 @@ import {
   BARRICADE_SIZE,
   COST_BARRICADE,
   COST_TRAP,
+  DEFEND_WAVES,
   EXTRACT_HOLD,
+  EXTRACT_OPEN_WAVE,
   EXTRACT_RADIUS,
   EXTRACTION_WAVE,
+  GENERATOR_RADIUS,
   FLASHLIGHT_HALF_ANGLE,
   FLASHLIGHT_RANGE,
   INTERACT_RADIUS,
@@ -322,6 +325,12 @@ export class GameScene extends Phaser.Scene {
   private extractBarBack!: Phaser.GameObjects.Rectangle;
   private extractBarFill!: Phaser.GameObjects.Rectangle;
   private extractLabel!: Phaser.GameObjects.Text;
+  // A8 defend: the generator body (world-space), its HP bar over it, and a top HUD line
+  private genBody!: Phaser.GameObjects.Rectangle;
+  private genGlow!: Phaser.GameObjects.Arc;
+  private genBarBack!: Phaser.GameObjects.Rectangle;
+  private genBarFill!: Phaser.GameObjects.Rectangle;
+  private genHud!: Phaser.GameObjects.Text; // "DEFEND · GENERATOR 80%  ·  WAVE 4 / 15"
   // COD layer render
   private codMarkers: { icon: Phaser.GameObjects.Star; label: Phaser.GameObjects.Text }[] = [];
   private codPrompt!: Phaser.GameObjects.Text; // screen-space "[F] buy …" line
@@ -400,6 +409,9 @@ export class GameScene extends Phaser.Scene {
       this.simRng = mulberry32(hashSeed(session.seed));
     }
     const numPlayers = session.role === 'host' ? session.players : session.role === 'guest' ? 4 : 1;
+    // A8: the host/solo player's chosen objective mode. Guests init endless and get
+    // the real mode + objective from the very first snapshot (both are serialized).
+    const mode = session.role === 'solo' || session.role === 'host' ? session.mode ?? 'endless' : 'endless';
     this.state = createGameState(
       map.walls,
       map.spawnZones,
@@ -409,6 +421,8 @@ export class GameScene extends Phaser.Scene {
       numPlayers,
       map.extractionPoint,
       map.interactables,
+      mode,
+      map.generatorPoint,
     );
     if (session.role === 'guest') this.state.players.forEach((p, i) => (p.alive = i === this.localIndex));
 
@@ -631,6 +645,15 @@ export class GameScene extends Phaser.Scene {
     this.extractBarBack = this.add.rectangle(480, 96, 360, 14, 0x0c221a).setScrollFactor(0).setDepth(DEPTH_HUD).setVisible(false);
     this.extractBarFill = this.add.rectangle(480 - 180, 96, 360, 14, 0x38ffb0).setOrigin(0, 0.5).setScrollFactor(0).setDepth(DEPTH_HUD).setVisible(false);
     this.extractLabel = this.add.text(480, 74, '', { fontFamily: 'monospace', fontSize: '14px', color: '#8affbf', fontStyle: 'bold' }).setOrigin(0.5).setScrollFactor(0).setDepth(DEPTH_HUD).setVisible(false);
+
+    // A8 defend: the generator (world space) — a glowing amber core the squad
+    // protects, with an HP bar floating over it and a DEFEND status line up top.
+    const gp = map.generatorPoint;
+    this.genGlow = this.add.circle(gp.x, gp.y, GENERATOR_RADIUS + 14, 0xffb020, 0.12).setDepth(DEPTH_FLOOR + 0.55).setVisible(false);
+    this.genBody = this.add.rectangle(gp.x, gp.y, GENERATOR_RADIUS * 2, GENERATOR_RADIUS * 2, 0x3a2c10).setStrokeStyle(3, 0xffb020, 0.9).setDepth(DEPTH_FLOOR + 0.6).setVisible(false);
+    this.genBarBack = this.add.rectangle(gp.x, gp.y - GENERATOR_RADIUS - 14, 78, 8, 0x2a1c06).setDepth(DEPTH_HUD - 1).setVisible(false);
+    this.genBarFill = this.add.rectangle(gp.x - 39, gp.y - GENERATOR_RADIUS - 14, 78, 8, 0xffc94a).setOrigin(0, 0.5).setDepth(DEPTH_HUD - 1).setVisible(false);
+    this.genHud = this.add.text(480, 74, '', { fontFamily: 'monospace', fontSize: '14px', color: '#ffc94a', fontStyle: 'bold' }).setOrigin(0.5).setScrollFactor(0).setDepth(DEPTH_HUD).setVisible(false);
 
     // Captions: a bottom-centre stack of fading lines (built even when off; the
     // caption() call is gated so nothing is added unless the setting is on).
@@ -1229,6 +1252,11 @@ export class GameScene extends Phaser.Scene {
     if (this.role === 'guest') {
       // Guests send intent and render the host's snapshots, but PREDICT their own
       // player locally so their movement/aim feels instant despite round-trip lag.
+      // B10: stamp the input with the tick of the snapshot the guest is currently
+      // viewing. The host uses currentTick - viewTick to rewind enemies to where
+      // this guest SAW them when it fired (favor-the-shooter). Host/solo leave
+      // viewTick 0 → no rewind, so their shots keep the exact live-world path.
+      input.viewTick = this.guestNet!.latest ? Math.round(this.guestNet!.latest.t / SIM_DT) : 0;
       this.guestNet!.sendInput(input);
       if (this.guestNet!.latest) {
         applySnapshot(this.state, this.guestNet!.latest);
@@ -2097,6 +2125,7 @@ export class GameScene extends Phaser.Scene {
     this.updateShopUI();
     this.updateDraftUI();
     this.updateExtractionHud(dt);
+    this.updateObjectiveHud(); // A8: extraction "exit opens in N" hint + defend generator + HP bar
     this.updateCodRender();
     this.updateDeployRender(); // A7: barricades (+hp bars), traps, build bar + placement preview
     this.syncPings(); // world-space co-op ping markers
@@ -2109,7 +2138,16 @@ export class GameScene extends Phaser.Scene {
       const reward = runReward(this.state.wave.index, this.state.totalKills);
       addCurrency(reward);
       const won = this.state.won;
-      const head = won ? 'YOU ESCAPED' : 'YOU DIED';
+      // A8: mode-flavoured end-screen headline. Defend: DEFENDED! / GENERATOR LOST;
+      // extraction + endless keep the existing YOU ESCAPED / YOU DIED.
+      const genLost = this.state.mode === 'defend' && !!this.state.objective && this.state.objective.hp <= 0;
+      const head = won
+        ? this.state.mode === 'defend'
+          ? 'DEFENDED!'
+          : 'YOU ESCAPED'
+        : genLost
+          ? 'GENERATOR LOST'
+          : 'YOU DIED';
       const seeded = !!this.seed;
       // Seeded run: compute the score, persist the local best for this seed, and
       // surface both on the end screen (+ a copyable seed for sharing a run).
@@ -2143,7 +2181,7 @@ export class GameScene extends Phaser.Scene {
           copy.setText('✓ seed copied');
         });
       }
-      if (won) this.banner('EXTRACTION COMPLETE', '#7dffa0');
+      if (won) this.banner(this.state.mode === 'defend' ? 'GENERATOR DEFENDED' : 'EXTRACTION COMPLETE', '#7dffa0');
     }
 
     this.drawMinimap();
@@ -2234,6 +2272,43 @@ export class GameScene extends Phaser.Scene {
       frac >= 1 ? 'ESCAPING…' : onScreen ? `HOLD THE EXIT  ${Math.floor(frac * 100)}%` : 'REACH THE EXIT — follow the arrow',
     );
     void dt;
+  }
+
+  /**
+   * A8 objective modes. Extraction: before the exit opens, show a "EXIT OPENS IN N
+   * WAVES" hint (the beacon/bar are the existing extraction HUD, driven separately).
+   * Defend: render the generator body + glow + a floating HP bar and a top DEFEND
+   * status line; hide everything in endless.
+   */
+  private updateObjectiveHud(): void {
+    const mode = this.state.mode;
+
+    // — extraction: pre-open hint (once open, updateExtractionHud takes over) —
+    const extPending = mode === 'extraction' && !this.state.extraction && !this.state.gameOver;
+    if (extPending) {
+      const left = Math.max(0, EXTRACT_OPEN_WAVE - this.state.wave.index);
+      this.extractLabel
+        .setVisible(true)
+        .setText(left <= 0 ? 'THE EXIT IS OPENING…' : `SURVIVE — EXIT OPENS IN ${left} WAVE${left === 1 ? '' : 'S'}`);
+    }
+
+    // — defend: generator body, glow, floating HP bar, and the DEFEND status line —
+    const gen = this.state.objective;
+    const showGen = mode === 'defend' && !!gen;
+    this.genGlow.setVisible(showGen);
+    this.genBody.setVisible(showGen);
+    this.genBarBack.setVisible(showGen);
+    this.genBarFill.setVisible(showGen);
+    this.genHud.setVisible(showGen && !this.state.gameOver);
+    if (showGen && gen) {
+      const frac = Math.max(0, Math.min(1, gen.hp / gen.maxHp));
+      this.genBarFill.width = 78 * frac;
+      // low-HP the bar reads red; a soft pulse on the glow while it still lives
+      this.genBarFill.setFillStyle(frac > 0.35 ? 0xffc94a : 0xff5a4a);
+      const pulse = gen.hp > 0 ? 0.1 + 0.06 * (0.5 + 0.5 * Math.sin(this.state.time * 4)) : 0;
+      this.genGlow.setFillStyle(0xffb020, pulse);
+      this.genHud.setText(`◎ DEFEND · GENERATOR ${Math.ceil(frac * 100)}%   ·   WAVE ${Math.min(this.state.wave.index, DEFEND_WAVES)} / ${DEFEND_WAVES}`);
+    }
   }
 
   /** Scale an image to a display height, preserving the source aspect ratio. */

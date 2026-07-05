@@ -1,9 +1,10 @@
-import { BOOMER_BLAST_DMG, BOOMER_BLAST_RADIUS, BULLET_KNOCKBACK, CASH_BOSS, CASH_PER_HIT, CASH_PER_KILL, PLAYER_RADIUS, POWERUP_DROP_CHANCE, ZED_CHARGE_PER_KILL } from '../config';
+import { BOOMER_BLAST_DMG, BOOMER_BLAST_RADIUS, BULLET_KNOCKBACK, CASH_BOSS, CASH_PER_HIT, CASH_PER_KILL, GENERATOR_RADIUS, PLAYER_RADIUS, POWERUP_DROP_CHANCE, ZED_CHARGE_PER_KILL } from '../config';
 import { affixBulletResist, affixExplodesOnDeath } from './affix';
 import { cashMult, dropPowerUp, rollPowerUp } from './cod';
 import { directorDropMult } from './director';
 import { downPlayer } from './coop';
 import { ZOMBIES } from './enemies';
+import { rewoundEnemyPos } from './lagcomp';
 import { dropLoot } from './loot';
 import { mapSolids } from './map';
 import { isInvulnerable } from './movement';
@@ -58,11 +59,20 @@ function insideWall(pos: Vec2, walls: Wall[]): boolean {
 }
 
 function firstEnemyHit(state: GameState, b: BulletState) {
+  // B10: a guest bullet (lag > 0) tests against each enemy's position AS OF the
+  // tick the shooter saw (favor-the-shooter). lag === 0 (host/solo/live) uses the
+  // enemy's CURRENT pos — byte-for-byte the pre-B10 path. Only the overlap
+  // POSITION is rewound; the hit enemy, damage, knockback and payout are the
+  // live enemy resolved by the caller. Rewind is bounded (clampLag) so a stale
+  // shot can't reach across the map, and walls are checked at the bullet's real
+  // position elsewhere, so it can't hit through them.
+  const lag = b.lag ?? 0;
   for (const e of state.enemies) {
     if (e.hp <= 0) continue;
     const r = ZOMBIES[e.type].radius;
-    const dx = b.pos.x - e.pos.x;
-    const dy = b.pos.y - e.pos.y;
+    const ep = lag > 0 ? rewoundEnemyPos(state, e, lag) : e.pos;
+    const dx = b.pos.x - ep.x;
+    const dy = b.pos.y - ep.y;
     if (dx * dx + dy * dy <= r * r) return e;
   }
   return undefined;
@@ -191,6 +201,19 @@ export function updateCombat(state: GameState, dt: number, rng: () => number = M
         e.hp -= thorns * edt;
         e.hitFlash = HIT_FLASH;
       }
+    }
+  }
+
+  // A8 defend: any enemy overlapping the generator claws it down at its contact
+  // DPS (the same model as clawing a player). The win/lose read of the result
+  // lives in updateDefend; here we only drain HP. Bosses hit it too.
+  const gen = state.objective;
+  if (gen && gen.hp > 0) {
+    for (const e of state.enemies) {
+      const rr = ZOMBIES[e.type].radius + GENERATOR_RADIUS;
+      const dx = gen.x - e.pos.x;
+      const dy = gen.y - e.pos.y;
+      if (dx * dx + dy * dy <= rr * rr) gen.hp = Math.max(0, gen.hp - ZOMBIES[e.type].contactDamage * edt);
     }
   }
   // gameOver (all players down/dead) is decided in stepSim.
