@@ -116,13 +116,13 @@ export function buildMap(): MapDef {
   c.rect(116, 52, 140, 62); // GENERATOR room (SE) — top row overlaps the sewer
 
   // ── necks + doors (each door fills its neck exactly) ────────────────────────
-  // Pay-to-open doors (COD debris): buy your way deeper; interior connectors are free.
+  // Pay-to-open doors (COD debris): buy your way deeper.
   vneck(70, 74, 20, 24, 0, 1250); // D6: lobby ↔ hall (leads to power/PaP)
   hneck(48, 58, 30, 33, 0, 750); // D1: lobby ↔ west wing
   hneck(86, 96, 30, 33, 0, 750); // D2: lobby ↔ east wing
   vneck(70, 74, 40, 46, 0, 1000); // D5: lobby ↔ sewer
-  vneck(10, 14, 20, 23, 0); // parking ↔ west wing (free interior)
-  vneck(129, 133, 20, 23, 0); // warehouse ↔ east wing (free interior)
+  vneck(10, 14, 20, 23, 0, 750); // parking ↔ west wing
+  vneck(129, 133, 20, 23, 0, 750); // warehouse ↔ east wing
   vneck(24, 28, 42, 46, 0, 1000); // west wing ↔ sewer (loop)
   vneck(116, 120, 42, 46, 0, 1000); // east wing ↔ sewer (loop)
   // cave + generator open directly into the sewer (organic mouths, no doors)

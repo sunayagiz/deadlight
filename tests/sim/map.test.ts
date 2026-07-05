@@ -54,15 +54,6 @@ describe('map + doors', () => {
     expect(withOneOpen).toBe(withClosed - 1);
   });
 
-  it('a free interior door opens on proximity; far doors stay shut', () => {
-    const s = bigMapState();
-    const d = s.doors.find((x) => x.cost === 0)!;
-    updateDoors(s); // player at lobby start, far from it
-    expect(d.open).toBe(false);
-    s.player.pos = { x: d.x + d.w / 2, y: d.y + d.h / 2 - 30 };
-    updateDoors(s);
-    expect(d.open).toBe(true);
-  });
 
   it('a pay-door ignores proximity and only opens when bought with enough cash', () => {
     const s = bigMapState();

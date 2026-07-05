@@ -304,7 +304,7 @@ function buyNearestDoor(state: GameState, p: PlayerState): void {
     const cy = d.y + d.h / 2;
     const reach = INTERACT_RADIUS + Math.max(d.w, d.h) / 2;
     if ((p.pos.x - cx) ** 2 + (p.pos.y - cy) ** 2 > reach * reach) continue;
-    if (state.cash < d.cost) return;
+    if (state.cash < d.cost) continue;
     state.cash -= d.cost;
     d.open = true;
     return;
